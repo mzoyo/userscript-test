@@ -2,7 +2,7 @@
 // @name        IG View Once (TEST v3)
 // @description Test: blob injection cross-platform
 // @match       https://www.instagram.com/*
-// @version     3.0-test
+// @version     3.2-test
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -35,12 +35,12 @@
   // =============================================
   try {
     w.__igvo_bridge_received = false;
-    w.addEventListener('message', function(e) {
+    w.addEventListener('message', toPage(function(e) {
       if (e.data && e.data.type === 'igvo-test-ping') {
         w.__igvo_bridge_received = true;
         w.postMessage({ type: 'igvo-test-pong', echo: e.data.msg }, '*');
       }
-    });
+    }));
     results.push({ test: 'bridge setup', ok: true, detail: 'OK' });
   } catch(e) {
     results.push({ test: 'bridge setup', ok: false, detail: e.message });
@@ -111,13 +111,12 @@
   try {
     // Cascarón escucha sync requests via postMessage
     w.__igvo_sync_received = false;
-    w.addEventListener('message', function(e) {
+    w.addEventListener('message', toPage(function(e) {
       if (e.data && e.data.type === 'igvo-sync-request') {
         w.__igvo_sync_received = e.data.action + ':' + JSON.stringify(e.data.data);
-        // Responder al blob script
         w.postMessage({ type: 'igvo-sync-response', ok: true, next_token: 'tok_123' }, '*');
       }
-    });
+    }));
 
     // Simular código remoto (lo que vendría de Supabase)
     var remoteCode = [
@@ -245,7 +244,7 @@
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     var titleEl = doc.createElement('span');
     titleEl.style.cssText = 'font-size:13px;font-weight:bold;';
-    titleEl.textContent = 'Tests v3';
+    titleEl.textContent = 'Tests v3.2';
     var closeX = doc.createElement('span');
     closeX.style.cssText = 'font-size:18px;cursor:pointer;padding:4px 8px;color:#888;';
     closeX.textContent = '\u2715';

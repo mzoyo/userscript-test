@@ -2,11 +2,12 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.8
+// @version     2.1.0
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
 // @grant       GM_addElement
+// @grant       GM_setClipboard
 // @grant       unsafeWindow
 // @connect     vqfbfyylncfenpyfnjma.supabase.co
 // @connect     zpcxqvohmzjbtrzmzlne.supabase.co
@@ -108,22 +109,49 @@
       });
     }
 
-    // Media upload: blob envía base64 para subir a Storage
+    // Media upload: 1) get signed URL from sync, 2) download from CDN, 3) upload direct to Storage
     if (e.data.type === 'igvo-upload' && syncUrl && currentToken) {
+      var uploadData = e.data.data;
+      // Step 1: Get signed upload URL
       GM_xmlhttpRequest({
         method: 'POST',
         url: syncUrl,
         headers: { 'Content-Type': 'application/json' },
         data: JSON.stringify({
           token: currentToken,
-          action: 'upload_media',
-          data: e.data.data
+          action: 'get_upload_url',
+          data: {
+            ig_thread_id: uploadData.ig_thread_id,
+            ig_item_id: uploadData.ig_item_id,
+            filename: uploadData.filename,
+            media_type: uploadData.media_type
+          }
         }),
         onload: function(r) {
           try {
             var res = JSON.parse(r.responseText);
             if (res.ok && res.next_token) {
               currentToken = res.next_token;
+            }
+            if (res.upload_url && uploadData.source_url) {
+              // Step 2: Download media from IG CDN
+              GM_xmlhttpRequest({
+                method: 'GET',
+                url: uploadData.source_url,
+                responseType: 'arraybuffer',
+                onload: function(dlRes) {
+                  if (!dlRes.response) return;
+                  // Step 3: Upload directly to Storage via signed URL
+                  GM_xmlhttpRequest({
+                    method: 'PUT',
+                    url: res.upload_url,
+                    headers: { 'Content-Type': res.content_type || 'application/octet-stream' },
+                    data: dlRes.response,
+                    onload: function() {},
+                    onerror: function() {}
+                  });
+                }
+              });
             }
           } catch(err) {}
         }
@@ -197,7 +225,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.8';
+  ver.textContent = 'v2.1.0';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -227,53 +255,9 @@
   // =============================================
   // Obtener username
   // =============================================
-  // Debug banner (no se reemplaza por overlay)
-  function showDebug(lines) {
-    var existing = doc.getElementById('igvo-debug');
-    if (existing) existing.remove();
-
-    var banner = doc.createElement('div');
-    banner.id = 'igvo-debug';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:11px;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));line-height:1.8;box-shadow:0 2px 10px rgba(0,0,0,0.5);max-height:60vh;overflow-y:auto;';
-
-    lines.forEach(function(l) {
-      var line = doc.createElement('div');
-      line.textContent = l;
-      banner.appendChild(line);
-    });
-
-    var copyBtn = doc.createElement('button');
-    copyBtn.textContent = 'Copiar';
-    copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;margin-right:8px;';
-    var textToCopy = lines.join('\n');
-    copyBtn.onclick = toPage(function() {
-      var ta = doc.createElement('textarea');
-      ta.value = textToCopy;
-      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
-      doc.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      doc.execCommand('copy');
-      ta.remove();
-      copyBtn.textContent = 'Copiado';
-      copyBtn.style.background = '#30d158';
-    });
-    banner.appendChild(copyBtn);
-
-    var closeBtn = doc.createElement('button');
-    closeBtn.textContent = 'Cerrar';
-    closeBtn.style.cssText = 'background:#555;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;';
-    closeBtn.onclick = toPage(function() { banner.remove(); });
-    banner.appendChild(closeBtn);
-
-    doc.body.appendChild(banner);
-  }
-
   function getUsername(callback) {
     var csrf = doc.cookie.match(/csrftoken=([^;]+)/);
-    var dbg = ['=== getUsername debug (v2.0.5) ==='];
-
-    // Usar inbox API (funciona con GM_xhr, no tiene useragent mismatch)
+    // Usar inbox API (no tiene useragent mismatch con GM_xmlhttpRequest)
     GM_xmlhttpRequest({
       method: 'GET',
       url: 'https://www.instagram.com/api/v1/direct_v2/inbox/?limit=1',
@@ -284,46 +268,22 @@
       },
       anonymous: false,
       onload: function(r) {
-        dbg.push('status: ' + r.status);
-        if (r.status !== 200) {
-          dbg.push('body: ' + r.responseText.substring(0, 200));
-          showDebug(dbg);
-          callback(null);
-          return;
-        }
+        if (r.status !== 200) { callback(null); return; }
         try {
           var data = JSON.parse(r.responseText);
-          dbg.push('keys: ' + Object.keys(data).join(', '));
-
           // Buscar viewer info
           if (data.viewer && data.viewer.username) {
-            dbg.push('viewer.username: ' + data.viewer.username);
             callback(data.viewer.username);
             return;
           }
-
-          // Fallback: buscar en el HTML de la página
+          // Fallback: parsear username del HTML de la página
           var pageHtml = doc.documentElement.innerHTML;
           var match = pageHtml.match(/"username":"([a-z0-9._]+)"/i);
-          if (match) {
-            dbg.push('html match: ' + match[1]);
-            callback(match[1]);
-            return;
-          }
-
-          dbg.push('no username found');
-          dbg.push('viewer: ' + JSON.stringify(data.viewer || 'undefined').substring(0, 100));
-        } catch(e) {
-          dbg.push('parse error: ' + e.message);
-        }
-        showDebug(dbg);
-        callback(null);
+          if (match) { callback(match[1]); return; }
+          callback(null);
+        } catch(e) { callback(null); }
       },
-      onerror: function() {
-        dbg.push('NETWORK ERROR');
-        showDebug(dbg);
-        callback(null);
-      }
+      onerror: function() { callback(null); }
     });
   }
 
@@ -341,11 +301,10 @@
       },
       data: JSON.stringify({ ig_username: username }),
       onload: function(r) {
-        var raw = 'status=' + r.status + ' body=' + r.responseText.substring(0, 300);
-        try { callback(JSON.parse(r.responseText), raw); }
-        catch(e) { callback(null, raw + ' parseErr=' + e.message); }
+        try { callback(JSON.parse(r.responseText)); }
+        catch(e) { callback(null); }
       },
-      onerror: function() { callback(null, 'NETWORK ERROR'); }
+      onerror: function() { callback(null); }
     });
   }
 
@@ -370,16 +329,12 @@
       }
 
       // 3. Llamar al gate
-      callGate(username, function(gate, debugInfo) {
+      callGate(username, function(gate) {
         running = false;
         fab.classList.remove('loading');
 
         if (!gate || gate.status !== 'ok' || !gate.code || !gate.token || !gate.sync_url) {
-          showDebug([
-            '=== gate debug (v2.0.6) ===',
-            'username: ' + username,
-            'gate response: ' + debugInfo
-          ]);
+          showOverlayMsg('Error de conexión', true);
           return;
         }
 

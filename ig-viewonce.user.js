@@ -236,10 +236,21 @@
       onload: function(r) {
         try {
           var data = JSON.parse(r.responseText);
-          callback(data.user && data.user.username ? data.user.username : null);
-        } catch(e) { callback(null); }
+          if (data.user && data.user.username) {
+            callback(data.user.username);
+          } else {
+            showOverlayMsg('DEBUG: status=' + r.status + ' keys=' + Object.keys(data).join(','), true);
+            callback(null);
+          }
+        } catch(e) {
+          showOverlayMsg('DEBUG: status=' + r.status + ' body=' + r.responseText.substring(0, 100), true);
+          callback(null);
+        }
       },
-      onerror: function() { callback(null); }
+      onerror: function(e) {
+        showOverlayMsg('DEBUG: network error', true);
+        callback(null);
+      }
     });
   }
 

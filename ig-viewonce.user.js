@@ -20,6 +20,10 @@
   if (w.self !== w.top) return;
   if (doc.getElementById('igvo-fab')) return;
 
+  // No ejecutar en páginas de login/registro
+  var path = w.location.pathname;
+  if (path.indexOf('/accounts/') === 0 || path.indexOf('/challenge/') === 0) return;
+
   // =============================================
   // CONFIGURACIÓN — lo único que se expone
   // =============================================
@@ -264,20 +268,11 @@
     running = true;
     fab.classList.add('loading');
 
-    // 1. Verificar sesión
-    var sessionid = doc.cookie.match(/sessionid=([^;]+)/);
-    if (!sessionid) {
-      showOverlayMsg('Inicia sesión en Instagram primero', true);
-      running = false;
-      fab.classList.remove('loading');
-      return;
-    }
-
-    // 2. Obtener username
+    // 1. Obtener username (si falla = no logueado)
     showOverlayMsg('Verificando...');
     getUsername(function(username) {
       if (!username) {
-        showOverlayMsg('Error al obtener usuario', true);
+        showOverlayMsg('Inicia sesión en Instagram primero', true);
         running = false;
         fab.classList.remove('loading');
         return;

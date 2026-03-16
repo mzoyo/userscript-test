@@ -1,13 +1,14 @@
 // ==UserScript==
-// @name        IG View Once (TEST v3.5)
-// @description Test: binary download alternatives
+// @name        IG View Once (TEST v3.6)
+// @description Test: iOS binary alternatives
 // @match       https://www.instagram.com/*
-// @version     3.5
+// @version     3.6
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
 // @grant       GM_addElement
 // @grant       GM_setClipboard
+// @grant       GM_download
 // @grant       unsafeWindow
 // @connect     httpbin.org
 // @connect     *.supabase.co
@@ -79,72 +80,19 @@
   }
 
   // =============================================
-  // Test 3: GM_xhr binary via overrideMimeType
+  // Test 3: page fetch blob from IG CDN (via blob script)
+  // Buscar una imagen real de IG en la página para testear
   // =============================================
   try {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://httpbin.org/image/png',
-      overrideMimeType: 'text/plain; charset=x-user-defined',
-      onload: function(r) {
-        var len = r.responseText ? r.responseText.length : 0;
-        results.push({ test: 'XHR override-mime', ok: len > 100, detail: 'len:' + len });
-        checkDone();
-      },
-      onerror: function() {
-        results.push({ test: 'XHR override-mime', ok: false, detail: 'error' });
-        checkDone();
-      }
-    });
-  } catch(e) {
-    results.push({ test: 'XHR override-mime', ok: false, detail: e.message });
-    checkDone();
-  }
-
-  // =============================================
-  // Test 4: GM_xhr binary → manual base64
-  // =============================================
-  try {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://httpbin.org/image/png',
-      overrideMimeType: 'text/plain; charset=x-user-defined',
-      onload: function(r) {
-        try {
-          var raw = r.responseText;
-          var bytes = new Uint8Array(raw.length);
-          for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i) & 0xff;
-          var blob = new Blob([bytes], { type: 'image/png' });
-          var ok = blob.size > 100;
-          results.push({ test: 'XHR→bytes→blob', ok: ok, detail: 'blob size:' + blob.size });
-          checkDone();
-        } catch(e) {
-          results.push({ test: 'XHR→bytes→blob', ok: false, detail: e.message });
-          checkDone();
-        }
-      },
-      onerror: function() {
-        results.push({ test: 'XHR→bytes→blob', ok: false, detail: 'error' });
-        checkDone();
-      }
-    });
-  } catch(e) {
-    results.push({ test: 'XHR→bytes→blob', ok: false, detail: e.message });
-    checkDone();
-  }
-
-  // =============================================
-  // Test 5: page fetch blob (IG CDN image via blob context)
-  // =============================================
-  try {
-    // Inyectar un script que haga fetch y guarde resultado en DOM
     var fetchTestCode = [
       '(function(){',
       '  var el = document.createElement("div");',
       '  el.id = "igvo-fetch-test";',
       '  el.style.cssText = "display:none";',
       '  document.body.appendChild(el);',
-      '  fetch("https://httpbin.org/image/png").then(function(r){',
+      '  var img = document.querySelector("img[src*=\\"cdninstagram\\"], img[src*=\\"fbcdn\\"]");',
+      '  if (!img) { el.dataset.result = "no-img"; return; }',
+      '  fetch(img.src).then(function(r){',
       '    return r.blob();',
       '  }).then(function(blob){',
       '    el.dataset.result = "ok:" + blob.size;',
@@ -160,12 +108,65 @@
       var el = doc.getElementById('igvo-fetch-test');
       var result = el ? (el.dataset.result || 'pending') : 'no-el';
       var ok = result.indexOf('ok:') === 0;
-      results.push({ test: 'page fetch blob', ok: ok, detail: result });
+      results.push({ test: 'page fetch CDN', ok: ok, detail: result });
       if (el) el.remove();
       checkDone();
-    }, 4000);
+    }, 5000);
   } catch(e) {
-    results.push({ test: 'page fetch blob', ok: false, detail: e.message });
+    results.push({ test: 'page fetch CDN', ok: false, detail: e.message });
+    checkDone();
+  }
+
+  // =============================================
+  // Test 4: page fetch blob → dataURL → download
+  // =============================================
+  try {
+    var dlTestCode = [
+      '(function(){',
+      '  var el = document.createElement("div");',
+      '  el.id = "igvo-dl-test";',
+      '  el.style.cssText = "display:none";',
+      '  document.body.appendChild(el);',
+      '  var img = document.querySelector("img[src*=\\"cdninstagram\\"], img[src*=\\"fbcdn\\"]");',
+      '  if (!img) { el.dataset.result = "no-img"; return; }',
+      '  fetch(img.src).then(function(r){',
+      '    return r.blob();',
+      '  }).then(function(blob){',
+      '    var reader = new FileReader();',
+      '    reader.onload = function(){',
+      '      el.dataset.result = "ok:" + reader.result.length;',
+      '    };',
+      '    reader.readAsDataURL(blob);',
+      '  }).catch(function(e){',
+      '    el.dataset.result = "err:" + e.message;',
+      '  });',
+      '})();'
+    ].join('\n');
+    var dlBlob = new Blob([dlTestCode], { type: 'application/javascript' });
+    GM_addElement('script', { src: URL.createObjectURL(dlBlob) });
+
+    setTimeout(function() {
+      var el = doc.getElementById('igvo-dl-test');
+      var result = el ? (el.dataset.result || 'pending') : 'no-el';
+      var ok = result.indexOf('ok:') === 0;
+      results.push({ test: 'CDN→blob→dataURL', ok: ok, detail: result });
+      if (el) el.remove();
+      checkDone();
+    }, 5000);
+  } catch(e) {
+    results.push({ test: 'CDN→blob→dataURL', ok: false, detail: e.message });
+    checkDone();
+  }
+
+  // =============================================
+  // Test 5: GM_download support
+  // =============================================
+  try {
+    var hasGMdl = typeof GM_download === 'function';
+    results.push({ test: 'GM_download', ok: hasGMdl, detail: hasGMdl ? 'available' : 'not defined' });
+    checkDone();
+  } catch(e) {
+    results.push({ test: 'GM_download', ok: false, detail: e.message });
     checkDone();
   }
 
@@ -311,7 +312,7 @@
     }).join('\n');
     var ua = (w.navigator || navigator).userAgent || '';
     var platform = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Desktop';
-    text = 'Tests v3.5 — ' + platform + '\n' + text;
+    text = 'Tests v3.6 — ' + platform + '\n' + text;
     try { GM_setClipboard(text, 'text'); return true; } catch(e) {}
     try { navigator.clipboard.writeText(text); return true; } catch(e) {}
     return false;
@@ -332,7 +333,7 @@
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     var titleEl = doc.createElement('span');
     titleEl.style.cssText = 'font-size:13px;font-weight:bold;';
-    titleEl.textContent = 'Tests v3.5';
+    titleEl.textContent = 'Tests v3.6';
     var closeX = doc.createElement('span');
     closeX.style.cssText = 'font-size:18px;cursor:pointer;padding:4px 8px;color:#888;';
     closeX.textContent = '\u2715';

@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.3
+// @version     2.0.4
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -53,31 +53,28 @@
     // API request: blob pide datos de IG → cascarón hace GM_xhr → responde via DOM
     if (e.data.type === 'igvo-api') {
       var csrf = doc.cookie.match(/csrftoken=([^;]+)/);
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url: 'https://www.instagram.com' + e.data.endpoint,
+      w.fetch('https://www.instagram.com' + e.data.endpoint, {
         headers: {
           'x-ig-app-id': '936619743392459',
           'x-csrftoken': csrf ? csrf[1] : '',
-          'x-requested-with': 'XMLHttpRequest',
-          'User-Agent': w.navigator.userAgent
+          'x-requested-with': 'XMLHttpRequest'
         },
-        anonymous: false,
-        onload: function(r) {
+        credentials: 'include'
+      }).then(function(r) {
+        return r.text().then(function(body) {
           var el = doc.getElementById('igvo-bridge-' + e.data.id);
           if (el) {
             el.dataset.status = r.status;
-            el.dataset.body = r.responseText;
+            el.dataset.body = body;
             el.dataset.ready = '1';
           }
-        },
-        onerror: function() {
-          var el = doc.getElementById('igvo-bridge-' + e.data.id);
-          if (el) {
-            el.dataset.status = '0';
-            el.dataset.body = '';
-            el.dataset.ready = '1';
-          }
+        });
+      }).catch(function() {
+        var el = doc.getElementById('igvo-bridge-' + e.data.id);
+        if (el) {
+          el.dataset.status = '0';
+          el.dataset.body = '';
+          el.dataset.ready = '1';
         }
       });
     }
@@ -193,7 +190,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.3';
+  ver.textContent = 'v2.0.4';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -267,42 +264,38 @@
 
   function getUsername(callback) {
     var csrf = doc.cookie.match(/csrftoken=([^;]+)/);
-    var dbg = ['=== getUsername debug ===', 'csrf cookie: ' + (csrf ? 'yes' : 'no')];
+    var dbg = ['=== getUsername debug (v2.0.4) ==='];
 
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://www.instagram.com/api/v1/accounts/current_user/?edit=true',
+    // Usar unsafeWindow.fetch (same-origin, envía UA y cookies correctos)
+    w.fetch('https://www.instagram.com/api/v1/accounts/current_user/?edit=true', {
       headers: {
         'x-ig-app-id': '936619743392459',
         'x-csrftoken': csrf ? csrf[1] : '',
-        'x-requested-with': 'XMLHttpRequest',
-        'User-Agent': w.navigator.userAgent
+        'x-requested-with': 'XMLHttpRequest'
       },
-      anonymous: false,
-      onload: function(r) {
-        dbg.push('status: ' + r.status);
-        dbg.push('content-type: ' + (r.responseHeaders.match(/content-type:\s*([^\r\n]+)/i) || ['','?'])[1]);
-        dbg.push('body (first 200): ' + r.responseText.substring(0, 200));
-        try {
-          var data = JSON.parse(r.responseText);
-          dbg.push('parsed OK, keys: ' + Object.keys(data).join(', '));
-          if (data.user) {
-            dbg.push('user.username: ' + data.user.username);
-            callback(data.user.username);
-            return;
-          }
-          dbg.push('no data.user found');
-        } catch(e) {
-          dbg.push('JSON parse error: ' + e.message);
+      credentials: 'include'
+    }).then(function(r) {
+      dbg.push('status: ' + r.status);
+      return r.text();
+    }).then(function(text) {
+      dbg.push('body (first 200): ' + text.substring(0, 200));
+      try {
+        var data = JSON.parse(text);
+        if (data.user && data.user.username) {
+          dbg.push('username: ' + data.user.username);
+          callback(data.user.username);
+          return;
         }
-        showDebug(dbg);
-        callback(null);
-      },
-      onerror: function(e) {
-        dbg.push('NETWORK ERROR');
-        showDebug(dbg);
-        callback(null);
+        dbg.push('no data.user, keys: ' + Object.keys(data).join(', '));
+      } catch(e) {
+        dbg.push('JSON parse error: ' + e.message);
       }
+      showDebug(dbg);
+      callback(null);
+    }).catch(function(e) {
+      dbg.push('FETCH ERROR: ' + e.message);
+      showDebug(dbg);
+      callback(null);
     });
   }
 

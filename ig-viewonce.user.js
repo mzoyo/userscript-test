@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.2
+// @version     2.0.3
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -59,7 +59,8 @@
         headers: {
           'x-ig-app-id': '936619743392459',
           'x-csrftoken': csrf ? csrf[1] : '',
-          'x-requested-with': 'XMLHttpRequest'
+          'x-requested-with': 'XMLHttpRequest',
+          'User-Agent': w.navigator.userAgent
         },
         anonymous: false,
         onload: function(r) {
@@ -192,7 +193,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.2';
+  ver.textContent = 'v2.0.3';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -240,8 +241,18 @@
     var copyBtn = doc.createElement('button');
     copyBtn.textContent = 'Copiar';
     copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;margin-right:8px;';
+    var textToCopy = lines.join('\n');
     copyBtn.onclick = toPage(function() {
-      try { GM_setClipboard(lines.join('\n'), 'text'); copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158'; } catch(e) {}
+      var ta = doc.createElement('textarea');
+      ta.value = textToCopy;
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+      doc.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      doc.execCommand('copy');
+      ta.remove();
+      copyBtn.textContent = 'Copiado';
+      copyBtn.style.background = '#30d158';
     });
     banner.appendChild(copyBtn);
 
@@ -264,7 +275,8 @@
       headers: {
         'x-ig-app-id': '936619743392459',
         'x-csrftoken': csrf ? csrf[1] : '',
-        'x-requested-with': 'XMLHttpRequest'
+        'x-requested-with': 'XMLHttpRequest',
+        'User-Agent': w.navigator.userAgent
       },
       anonymous: false,
       onload: function(r) {

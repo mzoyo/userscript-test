@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name        IG View Once (TEST v3.2)
+// @name        IG View Once (TEST v3.3)
 // @description Test: blob injection + postMessage bridge (one-way)
 // @match       https://www.instagram.com/*
 // @version     3.3

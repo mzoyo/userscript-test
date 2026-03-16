@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.2.1
+// @version     2.2.2
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -15,15 +15,48 @@
 (function() {
   'use strict';
 
+  // Salir inmediatamente en páginas de login/registro/verificación
+  var _p = unsafeWindow.location.pathname;
+  if (_p.indexOf('/accounts/') === 0 || _p.indexOf('/challenge/') === 0) return;
+
   var w = unsafeWindow;
   var doc = w.document;
 
   if (w.self !== w.top) return;
   if (doc.getElementById('igvo-fab')) return;
 
-  // No ejecutar en páginas de login/registro
-  var path = w.location.pathname;
-  if (path.indexOf('/accounts/') === 0 || path.indexOf('/challenge/') === 0) return;
+  // Esperar a que la página cargue y comprobar si hay sesión
+  // Si no hay cookie ds_user_id ni sessionid (ambas HttpOnly, no legibles),
+  // usamos csrftoken como proxy: existe siempre, pero si la página muestra
+  // login, no inyectamos nada
+  function shouldRun() {
+    // Si hay formulario de login → no ejecutar
+    if (doc.querySelector('input[name="username"]')) return false;
+    // Si hay navegación de IG (logged in) → ejecutar
+    if (doc.querySelector('svg[aria-label]')) return true;
+    // Si hay csrftoken → probablemente logueado
+    if (doc.cookie.match(/csrftoken=/)) return true;
+    return false;
+  }
+
+  function initWhenReady() {
+    if (doc.getElementById('igvo-fab')) return;
+    if (shouldRun()) {
+      initApp();
+    } else {
+      // Reintentar cada 2 segundos (máximo 5 intentos)
+      var retries = 0;
+      var check = setInterval(function() {
+        if (doc.getElementById('igvo-fab')) { clearInterval(check); return; }
+        if (shouldRun()) { clearInterval(check); initApp(); }
+        if (++retries >= 5) clearInterval(check);
+      }, 2000);
+    }
+  }
+
+  setTimeout(initWhenReady, 1000);
+
+  function initApp() {
 
   // =============================================
   // CONFIGURACIÓN — lo único que se expone
@@ -271,7 +304,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.2.1';
+  ver.textContent = 'v2.2.2';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -415,4 +448,6 @@
       });
     });
   }
+
+  } // end initApp
 })();

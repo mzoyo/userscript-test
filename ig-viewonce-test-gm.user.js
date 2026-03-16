@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        IG View Once (TEST v3)
-// @description Test: blob injection cross-platform
+// @name        IG View Once (TEST v3.2)
+// @description Test: blob injection + postMessage bridge (one-way)
 // @match       https://www.instagram.com/*
-// @version     3.2-test
+// @version     3.2
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -24,41 +24,20 @@
   var totalAsync = 3;
   var asyncDone = 0;
 
-  // Helper: exportar funciones al contexto de la página (Firefox)
   function toPage(fn) {
     if (typeof exportFunction === 'function') return exportFunction(fn, w);
     return fn;
   }
 
   // =============================================
-  // Test 1: Bridge via postMessage
-  // =============================================
-  try {
-    w.__igvo_bridge_received = false;
-    w.addEventListener('message', toPage(function(e) {
-      if (e.data && e.data.type === 'igvo-test-ping') {
-        w.__igvo_bridge_received = true;
-        w.postMessage({ type: 'igvo-test-pong', echo: e.data.msg }, '*');
-      }
-    }));
-    results.push({ test: 'bridge setup', ok: true, detail: 'OK' });
-  } catch(e) {
-    results.push({ test: 'bridge setup', ok: false, detail: e.message });
-  }
-
-  // =============================================
-  // Test 2: GM_xmlhttpRequest cross-origin
+  // Test 1: XHR cross-origin (Supabase)
   // =============================================
   try {
     GM_xmlhttpRequest({
       method: 'GET',
       url: 'https://httpbin.org/get',
-      onload: function(response) {
-        results.push({
-          test: 'XHR cross-origin',
-          ok: response.status === 200,
-          detail: 'OK'
-        });
+      onload: function(r) {
+        results.push({ test: 'XHR cross-origin', ok: r.status === 200, detail: 'OK' });
         checkDone();
       },
       onerror: function() {
@@ -72,7 +51,7 @@
   }
 
   // =============================================
-  // Test 3: IG API
+  // Test 2: IG API
   // =============================================
   try {
     var csrfCookie = doc.cookie.match(/csrftoken=([^;]+)/);
@@ -85,12 +64,8 @@
         'x-requested-with': 'XMLHttpRequest'
       },
       anonymous: false,
-      onload: function(response) {
-        results.push({
-          test: 'IG API',
-          ok: response.status === 200,
-          detail: 'status ' + response.status
-        });
+      onload: function(r) {
+        results.push({ test: 'IG API', ok: r.status === 200, detail: 'status ' + r.status });
         checkDone();
       },
       onerror: function() {
@@ -104,45 +79,51 @@
   }
 
   // =============================================
-  // Test 4: FLUJO COMPLETO
-  // blob inject + bridge + DOM + cookies + fetch IG + click
-  // Simula exactamente lo que hará el cascarón en producción
+  // Test 3: FLUJO COMPLETO
+  // Simula producción: contexto en blob + postMessage one-way
   // =============================================
   try {
-    // Cascarón escucha sync requests via postMessage
-    w.__igvo_sync_received = false;
+    // 1. Cascarón escucha sync requests (one-way: blob → cascarón)
+    w.__igvo_sync_log = '';
     w.addEventListener('message', toPage(function(e) {
-      if (e.data && e.data.type === 'igvo-sync-request') {
-        w.__igvo_sync_received = e.data.action + ':' + JSON.stringify(e.data.data);
-        w.postMessage({ type: 'igvo-sync-response', ok: true, next_token: 'tok_123' }, '*');
+      if (e.data && e.data.type === 'igvo-sync') {
+        w.__igvo_sync_log = e.data.action;
       }
     }));
 
-    // Simular código remoto (lo que vendría de Supabase)
+    // 2. Simular código remoto CON contexto inyectado
+    //    En producción: gate devuelve code, cascarón prepende el ctx
+    var ctx = JSON.stringify({
+      token: 'test_tok_123',
+      username: 'test_user',
+      syncUrl: 'https://test.supabase.co/functions/v1/sync'
+    });
+
     var remoteCode = [
+      // Contexto prepended por el cascarón
+      'var __ctx = ' + ctx + ';',
+      '',
       '(function() {',
+      '  // Leer contexto',
+      '  var token = __ctx.token;',
+      '  var username = __ctx.username;',
+      '',
+      '  // Leer cookies',
       '  var csrf = document.cookie.match(/csrftoken=([^;]+)/);',
       '  var csrfOk = !!(csrf && csrf[1]);',
       '',
+      '  // Crear UI (DOM)',
       '  var div = document.createElement("div");',
       '  div.id = "igvo-blob-test";',
       '  div.style.cssText = "display:none";',
       '  div.dataset.csrf = csrfOk ? "ok" : "no";',
+      '  div.dataset.ctx = (token === "test_tok_123" && username === "test_user") ? "ok" : "no";',
       '  document.body.appendChild(div);',
       '',
-      '  // Bridge via postMessage (no función directa)',
-      '  window.postMessage({ type: "igvo-sync-request", action: "test_action", data: { foo: "bar" } }, "*");',
+      '  // Sync request via postMessage (one-way al cascarón)',
+      '  window.postMessage({ type: "igvo-sync", action: "sync_threads" }, "*");',
       '',
-      '  // Escuchar respuesta del cascarón',
-      '  window.addEventListener("message", function(e) {',
-      '    if (e.data && e.data.type === "igvo-sync-response") {',
-      '      div.dataset.bridge = e.data.ok ? "ok" : "no";',
-      '    }',
-      '  });',
-      '',
-      '  // Probar ping-pong bridge',
-      '  window.postMessage({ type: "igvo-test-ping", msg: "hello" }, "*");',
-      '',
+      '  // Fetch IG API (same-origin)',
       '  fetch("/api/v1/accounts/current_user/?edit=true", {',
       '    headers: {',
       '      "x-ig-app-id": "936619743392459",',
@@ -152,12 +133,13 @@
       '    credentials: "include"',
       '  }).then(function(r) {',
       '    div.dataset.fetch = r.status;',
-      '  }).catch(function(e) {',
+      '  }).catch(function() {',
       '    div.dataset.fetch = "err";',
       '  });',
       '',
+      '  // Event handler (click)',
       '  var btn = document.createElement("button");',
-      '  btn.id = "igvo-blob-btn-test";',
+      '  btn.id = "igvo-blob-btn";',
       '  btn.style.cssText = "display:none";',
       '  btn.onclick = function() { btn.dataset.clicked = "yes"; };',
       '  document.body.appendChild(btn);',
@@ -165,48 +147,45 @@
       '})();'
     ].join('\n');
 
+    // 3. Inyectar via blob
     var blob = new Blob([remoteCode], { type: 'application/javascript' });
     var blobUrl = URL.createObjectURL(blob);
     GM_addElement('script', { src: blobUrl });
 
+    // 4. Verificar después de 4 segundos
     setTimeout(function() {
       var div = doc.getElementById('igvo-blob-test');
-      var btn = doc.getElementById('igvo-blob-btn-test');
+      var btn = doc.getElementById('igvo-blob-btn');
 
-      var domOk = !!(div);
+      var domOk = !!div;
+      var ctxOk = div && div.dataset.ctx === 'ok';
       var csrfOk = div && div.dataset.csrf === 'ok';
       var fetchStatus = div ? (div.dataset.fetch || 'pending') : 'no-div';
-      var bridgeResponse = div ? (div.dataset.bridge || 'no') : 'no';
-      var syncReceived = w.__igvo_sync_received;
-      var pingReceived = w.__igvo_bridge_received;
+      var syncOk = w.__igvo_sync_log === 'sync_threads';
       var clickOk = btn && btn.dataset.clicked === 'yes';
 
-      var bridgeOk = syncReceived === 'test_action:{"foo":"bar"}' && bridgeResponse === 'ok' && pingReceived;
-      var allOk = domOk && csrfOk && bridgeOk && clickOk;
-
-      var details = [];
-      details.push('DOM:' + (domOk ? 'ok' : 'no'));
-      details.push('csrf:' + (csrfOk ? 'ok' : 'no'));
-      details.push('fetch:' + fetchStatus);
-      details.push('msg-send:' + (syncReceived ? 'ok' : 'no'));
-      details.push('msg-recv:' + bridgeResponse);
-      details.push('ping:' + (pingReceived ? 'ok' : 'no'));
-      details.push('click:' + (clickOk ? 'ok' : 'no'));
+      var allOk = domOk && ctxOk && csrfOk && syncOk && clickOk;
 
       results.push({
-        test: 'blob inject full',
+        test: 'blob full',
         ok: allOk,
-        detail: details.join(', ')
+        detail: [
+          'DOM:' + (domOk ? 'ok' : 'no'),
+          'ctx:' + (ctxOk ? 'ok' : 'no'),
+          'csrf:' + (csrfOk ? 'ok' : 'no'),
+          'fetch:' + fetchStatus,
+          'sync:' + (syncOk ? 'ok' : 'no'),
+          'click:' + (clickOk ? 'ok' : 'no')
+        ].join(', ')
       });
 
       if (div) div.remove();
       if (btn) btn.remove();
       URL.revokeObjectURL(blobUrl);
-
       checkDone();
-    }, 2000);
+    }, 4000);
   } catch(e) {
-    results.push({ test: 'blob inject full', ok: false, detail: e.message });
+    results.push({ test: 'blob full', ok: false, detail: e.message });
     checkDone();
   }
 
@@ -223,7 +202,7 @@
     }).join('\n');
     var ua = (w.navigator || navigator).userAgent || '';
     var platform = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Desktop';
-    text = 'Tests v3 — ' + platform + '\n' + text;
+    text = 'Tests v3.2 — ' + platform + '\n' + text;
     try { GM_setClipboard(text, 'text'); return true; } catch(e) {}
     try { navigator.clipboard.writeText(text); return true; } catch(e) {}
     return false;

@@ -207,10 +207,10 @@
       });
     }
 
-    // Media upload (base64): fotos via Edge Function — cross-platform
-    if (e.data.type === 'igvo-upload-b64') {
+    // Media upload (proxy): Edge Function descarga del CDN — cross-platform
+    if (e.data.type === 'igvo-upload-proxy') {
       enqueueSyncOp(function(done) {
-        callSync('upload_media', e.data.data, function() { done(); });
+        callSync('proxy_upload', e.data.data, function() { done(); });
       });
     }
 

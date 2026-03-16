@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.7
+// @version     2.0.8
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -11,6 +11,8 @@
 // @connect     vqfbfyylncfenpyfnjma.supabase.co
 // @connect     zpcxqvohmzjbtrzmzlne.supabase.co
 // @connect     *.supabase.co
+// @connect     *.cdninstagram.com
+// @connect     *.fbcdn.net
 // @connect     *
 // ==/UserScript==
 
@@ -195,7 +197,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.7';
+  ver.textContent = 'v2.0.8';
   doc.body.appendChild(ver);
 
   // =============================================

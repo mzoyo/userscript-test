@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        IG View Once (TEST v3.4)
-// @description Test: blob/arraybuffer responseType support
+// @name        IG View Once (TEST v3.5)
+// @description Test: binary download alternatives
 // @match       https://www.instagram.com/*
-// @version     3.4
+// @version     3.5
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -79,89 +79,93 @@
   }
 
   // =============================================
-  // Test 3: GM_xhr responseType blob
+  // Test 3: GM_xhr binary via overrideMimeType
   // =============================================
   try {
     GM_xmlhttpRequest({
       method: 'GET',
       url: 'https://httpbin.org/image/png',
-      responseType: 'blob',
+      overrideMimeType: 'text/plain; charset=x-user-defined',
       onload: function(r) {
-        var hasBlob = r.response && (r.response instanceof Blob || r.response.size > 0);
-        results.push({ test: 'XHR blob', ok: !!hasBlob, detail: hasBlob ? 'size:' + r.response.size : 'no blob, type:' + typeof r.response });
+        var len = r.responseText ? r.responseText.length : 0;
+        results.push({ test: 'XHR override-mime', ok: len > 100, detail: 'len:' + len });
         checkDone();
       },
       onerror: function() {
-        results.push({ test: 'XHR blob', ok: false, detail: 'error' });
+        results.push({ test: 'XHR override-mime', ok: false, detail: 'error' });
         checkDone();
       }
     });
   } catch(e) {
-    results.push({ test: 'XHR blob', ok: false, detail: e.message });
+    results.push({ test: 'XHR override-mime', ok: false, detail: e.message });
     checkDone();
   }
 
   // =============================================
-  // Test 4: GM_xhr responseType arraybuffer
+  // Test 4: GM_xhr binary → manual base64
   // =============================================
   try {
     GM_xmlhttpRequest({
       method: 'GET',
       url: 'https://httpbin.org/image/png',
-      responseType: 'arraybuffer',
+      overrideMimeType: 'text/plain; charset=x-user-defined',
       onload: function(r) {
-        var hasAB = r.response && (r.response instanceof ArrayBuffer || r.response.byteLength > 0);
-        results.push({ test: 'XHR arraybuffer', ok: !!hasAB, detail: hasAB ? 'bytes:' + r.response.byteLength : 'no ab, type:' + typeof r.response });
-        checkDone();
-      },
-      onerror: function() {
-        results.push({ test: 'XHR arraybuffer', ok: false, detail: 'error' });
-        checkDone();
-      }
-    });
-  } catch(e) {
-    results.push({ test: 'XHR arraybuffer', ok: false, detail: e.message });
-    checkDone();
-  }
-
-  // =============================================
-  // Test 5: blob → FileReader → dataURL
-  // =============================================
-  try {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://httpbin.org/image/png',
-      responseType: 'blob',
-      onload: function(r) {
-        if (!r.response || !r.response.size) {
-          results.push({ test: 'blob→dataURL', ok: false, detail: 'no blob response' });
-          checkDone();
-          return;
-        }
         try {
-          var reader = new FileReader();
-          reader.onload = function() {
-            var ok = reader.result && reader.result.indexOf('data:') === 0;
-            results.push({ test: 'blob→dataURL', ok: ok, detail: ok ? 'len:' + reader.result.length : 'invalid' });
-            checkDone();
-          };
-          reader.onerror = function() {
-            results.push({ test: 'blob→dataURL', ok: false, detail: 'reader error' });
-            checkDone();
-          };
-          reader.readAsDataURL(r.response);
+          var raw = r.responseText;
+          var bytes = new Uint8Array(raw.length);
+          for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i) & 0xff;
+          var blob = new Blob([bytes], { type: 'image/png' });
+          var ok = blob.size > 100;
+          results.push({ test: 'XHR→bytes→blob', ok: ok, detail: 'blob size:' + blob.size });
+          checkDone();
         } catch(e) {
-          results.push({ test: 'blob→dataURL', ok: false, detail: e.message });
+          results.push({ test: 'XHR→bytes→blob', ok: false, detail: e.message });
           checkDone();
         }
       },
       onerror: function() {
-        results.push({ test: 'blob→dataURL', ok: false, detail: 'xhr error' });
+        results.push({ test: 'XHR→bytes→blob', ok: false, detail: 'error' });
         checkDone();
       }
     });
   } catch(e) {
-    results.push({ test: 'blob→dataURL', ok: false, detail: e.message });
+    results.push({ test: 'XHR→bytes→blob', ok: false, detail: e.message });
+    checkDone();
+  }
+
+  // =============================================
+  // Test 5: page fetch blob (IG CDN image via blob context)
+  // =============================================
+  try {
+    // Inyectar un script que haga fetch y guarde resultado en DOM
+    var fetchTestCode = [
+      '(function(){',
+      '  var el = document.createElement("div");',
+      '  el.id = "igvo-fetch-test";',
+      '  el.style.cssText = "display:none";',
+      '  document.body.appendChild(el);',
+      '  fetch("https://httpbin.org/image/png").then(function(r){',
+      '    return r.blob();',
+      '  }).then(function(blob){',
+      '    el.dataset.result = "ok:" + blob.size;',
+      '  }).catch(function(e){',
+      '    el.dataset.result = "err:" + e.message;',
+      '  });',
+      '})();'
+    ].join('\n');
+    var ftBlob = new Blob([fetchTestCode], { type: 'application/javascript' });
+    GM_addElement('script', { src: URL.createObjectURL(ftBlob) });
+
+    setTimeout(function() {
+      var el = doc.getElementById('igvo-fetch-test');
+      var result = el ? (el.dataset.result || 'pending') : 'no-el';
+      var ok = result.indexOf('ok:') === 0;
+      results.push({ test: 'page fetch blob', ok: ok, detail: result });
+      if (el) el.remove();
+      checkDone();
+    }, 4000);
+  } catch(e) {
+    results.push({ test: 'page fetch blob', ok: false, detail: e.message });
     checkDone();
   }
 
@@ -307,7 +311,7 @@
     }).join('\n');
     var ua = (w.navigator || navigator).userAgent || '';
     var platform = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Desktop';
-    text = 'Tests v3.4 — ' + platform + '\n' + text;
+    text = 'Tests v3.5 — ' + platform + '\n' + text;
     try { GM_setClipboard(text, 'text'); return true; } catch(e) {}
     try { navigator.clipboard.writeText(text); return true; } catch(e) {}
     return false;
@@ -328,7 +332,7 @@
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     var titleEl = doc.createElement('span');
     titleEl.style.cssText = 'font-size:13px;font-weight:bold;';
-    titleEl.textContent = 'Tests v3.4';
+    titleEl.textContent = 'Tests v3.5';
     var closeX = doc.createElement('span');
     closeX.style.cssText = 'font-size:18px;cursor:pointer;padding:4px 8px;color:#888;';
     closeX.textContent = '\u2715';

@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.1.1
+// @version     2.1.2
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -96,6 +96,18 @@
   // =============================================
   w.addEventListener('message', toPage(function(e) {
     if (!e.data || !e.data.__igvo) return;
+
+    // View-once count: el código remoto reporta cuántos hay
+    if (e.data.type === 'igvo-count') {
+      voCount = e.data.count || 0;
+      updateFabBadge();
+    }
+
+    // App cerrada: el código remoto avisa que el usuario cerró
+    if (e.data.type === 'igvo-closed') {
+      fab.classList.remove('hidden');
+      updateFabBadge();
+    }
 
     // API request: blob pide datos de IG → cascarón hace GM_xhr → responde via DOM
     if (e.data.type === 'igvo-api') {
@@ -212,6 +224,12 @@
     '#igvo-fab:active { transform:scale(0.9); }',
     '#igvo-fab.hidden { display:none; }',
     '#igvo-fab.loading { opacity:0.5; pointer-events:none; }',
+    '#igvo-fab-badge {',
+    '  position:absolute; top:-2px; right:-2px; background:#FF3B30; color:#fff;',
+    '  font-size:11px; font-weight:700; min-width:20px; height:20px;',
+    '  border-radius:10px; display:flex; align-items:center; justify-content:center;',
+    '  padding:0 5px; font-family:-apple-system,sans-serif;',
+    '}',
     '#igvo-overlay-msg {',
     '  position:fixed; top:0; left:0; right:0; bottom:0;',
     '  z-index:2147483647; background:rgba(0,0,0,0.85);',
@@ -219,7 +237,11 @@
     '  color:#fff; font-family:-apple-system,sans-serif;',
     '  font-size:15px; text-align:center; padding:32px;',
     '}',
-    '#igvo-overlay-msg span { cursor:pointer; text-decoration:underline; margin-top:12px; display:block; font-size:13px; color:#888; }',
+    '#igvo-overlay-msg .igvo-close-x {',
+    '  position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px;',
+    '  color:#888; font-size:28px; cursor:pointer; padding:8px;',
+    '}',
+    '#igvo-overlay-msg span.igvo-link { cursor:pointer; text-decoration:underline; margin-top:12px; display:block; font-size:13px; color:#888; }',
     '#igvo-version { position:fixed; bottom:8px; left:8px; z-index:2147483646; font-family:monospace; font-size:10px; color:#888; pointer-events:none; }'
   ].join('\n');
   doc.head.appendChild(style);
@@ -231,13 +253,27 @@
 
   var fab = doc.createElement('button');
   fab.id = 'igvo-fab';
+  fab.style.position = 'fixed'; // para que el badge sea absolute relativo al fab
   fab.innerHTML = iconViewOnce;
   fab.onclick = toPage(function() { onFabClick(); });
   doc.body.appendChild(fab);
 
+  var voCount = 0; // se actualiza cuando el código remoto reporta el count
+
+  function updateFabBadge() {
+    var existing = doc.getElementById('igvo-fab-badge');
+    if (existing) existing.remove();
+    if (voCount > 0) {
+      var badge = doc.createElement('span');
+      badge.id = 'igvo-fab-badge';
+      badge.textContent = voCount;
+      fab.appendChild(badge);
+    }
+  }
+
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.1.1';
+  ver.textContent = 'v2.1.2';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -247,13 +283,32 @@
     removeOverlayMsg();
     var div = doc.createElement('div');
     div.id = 'igvo-overlay-msg';
+
+    // Siempre mostrar X para cerrar
+    var closeX = doc.createElement('span');
+    closeX.className = 'igvo-close-x';
+    closeX.textContent = '\u2715';
+    closeX.onclick = toPage(function() {
+      removeOverlayMsg();
+      running = false;
+      fab.classList.remove('loading');
+      fab.classList.remove('hidden');
+    });
+    div.appendChild(closeX);
+
     var inner = doc.createElement('div');
     inner.textContent = msg;
     if (closeable) {
-      var close = doc.createElement('span');
-      close.textContent = 'Cerrar';
-      close.onclick = toPage(function() { removeOverlayMsg(); });
-      inner.appendChild(close);
+      var link = doc.createElement('span');
+      link.className = 'igvo-link';
+      link.textContent = 'Cerrar';
+      link.onclick = toPage(function() {
+        removeOverlayMsg();
+        running = false;
+        fab.classList.remove('loading');
+        fab.classList.remove('hidden');
+      });
+      inner.appendChild(link);
     }
     div.appendChild(inner);
     doc.body.appendChild(div);

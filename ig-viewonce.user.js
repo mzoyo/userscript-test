@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.1.2
+// @version     2.2.0
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -232,16 +232,19 @@
     '}',
     '#igvo-overlay-msg {',
     '  position:fixed; top:0; left:0; right:0; bottom:0;',
-    '  z-index:2147483647; background:rgba(0,0,0,0.85);',
+    '  z-index:2147483647; background:rgba(0,0,0,0.7);',
+    '  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);',
     '  display:flex; align-items:center; justify-content:center;',
     '  color:#fff; font-family:-apple-system,sans-serif;',
     '  font-size:15px; text-align:center; padding:32px;',
     '}',
-    '#igvo-overlay-msg .igvo-close-x {',
-    '  position:absolute; top:max(16px, env(safe-area-inset-top)); right:16px;',
-    '  color:#888; font-size:28px; cursor:pointer; padding:8px;',
+    '#igvo-overlay-msg .igvo-close-btn {',
+    '  position:absolute; top:max(12px, env(safe-area-inset-top)); right:16px;',
+    '  background:rgba(255,255,255,0.1); border:none; color:#fff;',
+    '  width:32px; height:32px; border-radius:50%; font-size:18px;',
+    '  display:flex; align-items:center; justify-content:center; cursor:pointer;',
     '}',
-    '#igvo-overlay-msg span.igvo-link { cursor:pointer; text-decoration:underline; margin-top:12px; display:block; font-size:13px; color:#888; }',
+    '#igvo-overlay-msg .igvo-close-btn:active { opacity:0.5; }',
     '#igvo-version { position:fixed; bottom:8px; left:8px; z-index:2147483646; font-family:monospace; font-size:10px; color:#888; pointer-events:none; }'
   ].join('\n');
   doc.head.appendChild(style);
@@ -273,7 +276,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.1.2';
+  ver.textContent = 'v2.2.0';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -284,32 +287,20 @@
     var div = doc.createElement('div');
     div.id = 'igvo-overlay-msg';
 
-    // Siempre mostrar X para cerrar
-    var closeX = doc.createElement('span');
-    closeX.className = 'igvo-close-x';
-    closeX.textContent = '\u2715';
-    closeX.onclick = toPage(function() {
+    // Botón circular para cerrar (mismo estilo que el overlay de la app)
+    var closeBtn = doc.createElement('button');
+    closeBtn.className = 'igvo-close-btn';
+    closeBtn.textContent = '\u2715';
+    closeBtn.onclick = toPage(function() {
       removeOverlayMsg();
       running = false;
       fab.classList.remove('loading');
       fab.classList.remove('hidden');
     });
-    div.appendChild(closeX);
+    div.appendChild(closeBtn);
 
     var inner = doc.createElement('div');
     inner.textContent = msg;
-    if (closeable) {
-      var link = doc.createElement('span');
-      link.className = 'igvo-link';
-      link.textContent = 'Cerrar';
-      link.onclick = toPage(function() {
-        removeOverlayMsg();
-        running = false;
-        fab.classList.remove('loading');
-        fab.classList.remove('hidden');
-      });
-      inner.appendChild(link);
-    }
     div.appendChild(inner);
     doc.body.appendChild(div);
   }

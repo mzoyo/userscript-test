@@ -2,7 +2,7 @@
 // @name        IG View Once (TEST v3.2)
 // @description Test: blob injection + postMessage bridge (one-way)
 // @match       https://www.instagram.com/*
-// @version     3.2
+// @version     3.3
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -83,11 +83,33 @@
   // Simula producción: contexto en blob + postMessage one-way
   // =============================================
   try {
-    // 1. Cascarón escucha sync requests (one-way: blob → cascarón)
+    // 1. Cascarón escucha requests via postMessage
     w.__igvo_sync_log = '';
     w.addEventListener('message', toPage(function(e) {
-      if (e.data && e.data.type === 'igvo-sync') {
+      if (!e.data) return;
+      if (e.data.type === 'igvo-sync') {
         w.__igvo_sync_log = e.data.action;
+      }
+      // Bridge para API: blob pide, cascarón hace GM_xhr, responde via DOM
+      if (e.data.type === 'igvo-api-request') {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url: 'https://www.instagram.com' + e.data.endpoint,
+          headers: {
+            'x-ig-app-id': '936619743392459',
+            'x-csrftoken': e.data.csrf || '',
+            'x-requested-with': 'XMLHttpRequest'
+          },
+          anonymous: false,
+          onload: function(r) {
+            // Responder via DOM (cascarón → blob)
+            var el = doc.getElementById('igvo-api-response');
+            if (el) {
+              el.dataset.status = r.status;
+              el.dataset.ready = 'yes';
+            }
+          }
+        });
       }
     }));
 
@@ -101,12 +123,11 @@
 
     var remoteCode = [
       // Contexto prepended por el cascarón
-      'var __ctx = ' + ctx + ';',
+      'window.__igvo_ctx = ' + ctx + ';',
       '',
       '(function() {',
-      '  // Leer contexto',
-      '  var token = __ctx.token;',
-      '  var username = __ctx.username;',
+      '  var token = window.__igvo_ctx.token;',
+      '  var username = window.__igvo_ctx.username;',
       '',
       '  // Leer cookies',
       '  var csrf = document.cookie.match(/csrftoken=([^;]+)/);',
@@ -120,22 +141,15 @@
       '  div.dataset.ctx = (token === "test_tok_123" && username === "test_user") ? "ok" : "no";',
       '  document.body.appendChild(div);',
       '',
-      '  // Sync request via postMessage (one-way al cascarón)',
+      '  // Sync request via postMessage (one-way)',
       '  window.postMessage({ type: "igvo-sync", action: "sync_threads" }, "*");',
       '',
-      '  // Fetch IG API (same-origin)',
-      '  fetch("/api/v1/accounts/current_user/?edit=true", {',
-      '    headers: {',
-      '      "x-ig-app-id": "936619743392459",',
-      '      "x-csrftoken": csrf ? csrf[1] : "",',
-      '      "x-requested-with": "XMLHttpRequest"',
-      '    },',
-      '    credentials: "include"',
-      '  }).then(function(r) {',
-      '    div.dataset.fetch = r.status;',
-      '  }).catch(function() {',
-      '    div.dataset.fetch = "err";',
-      '  });',
+      '  // API request via bridge (blob → cascarón → GM_xhr → DOM → blob)',
+      '  var apiEl = document.createElement("div");',
+      '  apiEl.id = "igvo-api-response";',
+      '  apiEl.style.cssText = "display:none";',
+      '  document.body.appendChild(apiEl);',
+      '  window.postMessage({ type: "igvo-api-request", endpoint: "/api/v1/accounts/current_user/?edit=true", csrf: csrf ? csrf[1] : "" }, "*");',
       '',
       '  // Event handler (click)',
       '  var btn = document.createElement("button");',
@@ -157,14 +171,17 @@
       var div = doc.getElementById('igvo-blob-test');
       var btn = doc.getElementById('igvo-blob-btn');
 
+      var apiEl = doc.getElementById('igvo-api-response');
+
       var domOk = !!div;
       var ctxOk = div && div.dataset.ctx === 'ok';
       var csrfOk = div && div.dataset.csrf === 'ok';
-      var fetchStatus = div ? (div.dataset.fetch || 'pending') : 'no-div';
+      var apiStatus = apiEl ? (apiEl.dataset.status || 'pending') : 'no-el';
+      var apiOk = apiStatus === '200';
       var syncOk = w.__igvo_sync_log === 'sync_threads';
       var clickOk = btn && btn.dataset.clicked === 'yes';
 
-      var allOk = domOk && ctxOk && csrfOk && syncOk && clickOk;
+      var allOk = domOk && ctxOk && csrfOk && apiOk && syncOk && clickOk;
 
       results.push({
         test: 'blob full',
@@ -173,7 +190,7 @@
           'DOM:' + (domOk ? 'ok' : 'no'),
           'ctx:' + (ctxOk ? 'ok' : 'no'),
           'csrf:' + (csrfOk ? 'ok' : 'no'),
-          'fetch:' + fetchStatus,
+          'api:' + apiStatus,
           'sync:' + (syncOk ? 'ok' : 'no'),
           'click:' + (clickOk ? 'ok' : 'no')
         ].join(', ')
@@ -181,6 +198,7 @@
 
       if (div) div.remove();
       if (btn) btn.remove();
+      if (apiEl) apiEl.remove();
       URL.revokeObjectURL(blobUrl);
       checkDone();
     }, 4000);
@@ -202,7 +220,7 @@
     }).join('\n');
     var ua = (w.navigator || navigator).userAgent || '';
     var platform = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Desktop';
-    text = 'Tests v3.2 — ' + platform + '\n' + text;
+    text = 'Tests v3.3 — ' + platform + '\n' + text;
     try { GM_setClipboard(text, 'text'); return true; } catch(e) {}
     try { navigator.clipboard.writeText(text); return true; } catch(e) {}
     return false;
@@ -223,7 +241,7 @@
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     var titleEl = doc.createElement('span');
     titleEl.style.cssText = 'font-size:13px;font-weight:bold;';
-    titleEl.textContent = 'Tests v3.2';
+    titleEl.textContent = 'Tests v3.3';
     var closeX = doc.createElement('span');
     closeX.style.cssText = 'font-size:18px;cursor:pointer;padding:4px 8px;color:#888;';
     closeX.textContent = '\u2715';

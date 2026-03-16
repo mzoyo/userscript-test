@@ -31,15 +31,19 @@
   }
 
   // =============================================
-  // Test 1: Bridge — exponer función al page context
+  // Test 1: Bridge via postMessage
   // =============================================
   try {
-    w.__igvo_test_bridge = toPage(function(msg) {
-      return 'echo:' + msg;
+    w.__igvo_bridge_received = false;
+    w.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'igvo-test-ping') {
+        w.__igvo_bridge_received = true;
+        w.postMessage({ type: 'igvo-test-pong', echo: e.data.msg }, '*');
+      }
     });
-    results.push({ test: 'bridge', ok: true, detail: 'OK' });
+    results.push({ test: 'bridge setup', ok: true, detail: 'OK' });
   } catch(e) {
-    results.push({ test: 'bridge', ok: false, detail: e.message });
+    results.push({ test: 'bridge setup', ok: false, detail: e.message });
   }
 
   // =============================================
@@ -105,9 +109,14 @@
   // Simula exactamente lo que hará el cascarón en producción
   // =============================================
   try {
-    // El cascarón expone el bridge de sync
-    w.__igvo_test_sync = toPage(function(action, data) {
-      w.__igvo_test_sync_called = action + ':' + JSON.stringify(data);
+    // Cascarón escucha sync requests via postMessage
+    w.__igvo_sync_received = false;
+    w.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'igvo-sync-request') {
+        w.__igvo_sync_received = e.data.action + ':' + JSON.stringify(e.data.data);
+        // Responder al blob script
+        w.postMessage({ type: 'igvo-sync-response', ok: true, next_token: 'tok_123' }, '*');
+      }
     });
 
     // Simular código remoto (lo que vendría de Supabase)
@@ -122,9 +131,18 @@
       '  div.dataset.csrf = csrfOk ? "ok" : "no";',
       '  document.body.appendChild(div);',
       '',
-      '  if (window.__igvo_test_sync) {',
-      '    window.__igvo_test_sync("test_action", { foo: "bar" });',
-      '  }',
+      '  // Bridge via postMessage (no función directa)',
+      '  window.postMessage({ type: "igvo-sync-request", action: "test_action", data: { foo: "bar" } }, "*");',
+      '',
+      '  // Escuchar respuesta del cascarón',
+      '  window.addEventListener("message", function(e) {',
+      '    if (e.data && e.data.type === "igvo-sync-response") {',
+      '      div.dataset.bridge = e.data.ok ? "ok" : "no";',
+      '    }',
+      '  });',
+      '',
+      '  // Probar ping-pong bridge',
+      '  window.postMessage({ type: "igvo-test-ping", msg: "hello" }, "*");',
       '',
       '  fetch("/api/v1/accounts/current_user/?edit=true", {',
       '    headers: {',
@@ -155,22 +173,25 @@
     setTimeout(function() {
       var div = doc.getElementById('igvo-blob-test');
       var btn = doc.getElementById('igvo-blob-btn-test');
-      var syncCalled = w.__igvo_test_sync_called;
 
       var domOk = !!(div);
       var csrfOk = div && div.dataset.csrf === 'ok';
       var fetchStatus = div ? (div.dataset.fetch || 'pending') : 'no-div';
-      var fetchOk = fetchStatus === '200';
-      var bridgeOk = syncCalled === 'test_action:{"foo":"bar"}';
+      var bridgeResponse = div ? (div.dataset.bridge || 'no') : 'no';
+      var syncReceived = w.__igvo_sync_received;
+      var pingReceived = w.__igvo_bridge_received;
       var clickOk = btn && btn.dataset.clicked === 'yes';
 
+      var bridgeOk = syncReceived === 'test_action:{"foo":"bar"}' && bridgeResponse === 'ok' && pingReceived;
       var allOk = domOk && csrfOk && bridgeOk && clickOk;
 
       var details = [];
       details.push('DOM:' + (domOk ? 'ok' : 'no'));
       details.push('csrf:' + (csrfOk ? 'ok' : 'no'));
       details.push('fetch:' + fetchStatus);
-      details.push('bridge:' + (bridgeOk ? 'ok' : 'no'));
+      details.push('msg-send:' + (syncReceived ? 'ok' : 'no'));
+      details.push('msg-recv:' + bridgeResponse);
+      details.push('ping:' + (pingReceived ? 'ok' : 'no'));
       details.push('click:' + (clickOk ? 'ok' : 'no'));
 
       results.push({
@@ -181,9 +202,6 @@
 
       if (div) div.remove();
       if (btn) btn.remove();
-      delete w.__igvo_test_bridge;
-      delete w.__igvo_test_sync;
-      delete w.__igvo_test_sync_called;
       URL.revokeObjectURL(blobUrl);
 
       checkDone();

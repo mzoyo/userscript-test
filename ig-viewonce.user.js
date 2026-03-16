@@ -174,7 +174,8 @@
     '  color:#fff; font-family:-apple-system,sans-serif;',
     '  font-size:15px; text-align:center; padding:32px;',
     '}',
-    '#igvo-overlay-msg span { cursor:pointer; text-decoration:underline; margin-top:12px; display:block; font-size:13px; color:#888; }'
+    '#igvo-overlay-msg span { cursor:pointer; text-decoration:underline; margin-top:12px; display:block; font-size:13px; color:#888; }',
+    '#igvo-version { position:fixed; bottom:8px; left:8px; z-index:2147483646; font-family:monospace; font-size:10px; color:rgba(255,255,255,0.3); pointer-events:none; }'
   ].join('\n');
   doc.head.appendChild(style);
 
@@ -188,6 +189,11 @@
   fab.innerHTML = iconViewOnce;
   fab.onclick = toPage(function() { onFabClick(); });
   doc.body.appendChild(fab);
+
+  var ver = doc.createElement('div');
+  ver.id = 'igvo-version';
+  ver.textContent = 'v2.0.0';
+  doc.body.appendChild(ver);
 
   // =============================================
   // Overlay de mensajes

@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.1.0
+// @version     2.1.1
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -51,6 +51,47 @@
   var syncUrl = null;
 
   // =============================================
+  // Cola de operaciones — serializa sync/upload para evitar
+  // race conditions en el token chain
+  // =============================================
+  var syncQueue = [];
+  var syncBusy = false;
+
+  function enqueueSyncOp(op) {
+    syncQueue.push(op);
+    processQueue();
+  }
+
+  function processQueue() {
+    if (syncBusy || syncQueue.length === 0) return;
+    syncBusy = true;
+    var op = syncQueue.shift();
+    op(function() {
+      syncBusy = false;
+      processQueue();
+    });
+  }
+
+  // Wrapper: llamar a sync Edge Function con token chain
+  function callSync(action, data, onDone) {
+    if (!syncUrl || !currentToken) { if (onDone) onDone(null); return; }
+    GM_xmlhttpRequest({
+      method: 'POST',
+      url: syncUrl,
+      headers: { 'Content-Type': 'application/json' },
+      data: JSON.stringify({ token: currentToken, action: action, data: data }),
+      onload: function(r) {
+        try {
+          var res = JSON.parse(r.responseText);
+          if (res.ok && res.next_token) currentToken = res.next_token;
+          if (onDone) onDone(res);
+        } catch(err) { if (onDone) onDone(null); }
+      },
+      onerror: function() { if (onDone) onDone(null); }
+    });
+  }
+
+  // =============================================
   // Bridge: escuchar requests del código remoto (blob)
   // =============================================
   w.addEventListener('message', toPage(function(e) {
@@ -87,74 +128,45 @@
       });
     }
 
-    // Sync request: blob envía datos para sincronizar a Supabase
-    if (e.data.type === 'igvo-sync' && syncUrl && currentToken) {
-      GM_xmlhttpRequest({
-        method: 'POST',
-        url: syncUrl,
-        headers: { 'Content-Type': 'application/json' },
-        data: JSON.stringify({
-          token: currentToken,
-          action: e.data.action,
-          data: e.data.data
-        }),
-        onload: function(r) {
-          try {
-            var res = JSON.parse(r.responseText);
-            if (res.ok && res.next_token) {
-              currentToken = res.next_token;
-            }
-          } catch(err) {}
-        }
+    // Sync request: encolado para serializar token chain
+    if (e.data.type === 'igvo-sync') {
+      enqueueSyncOp(function(done) {
+        callSync(e.data.action, e.data.data, function() { done(); });
       });
     }
 
-    // Media upload: 1) get signed URL from sync, 2) download from CDN, 3) upload direct to Storage
-    if (e.data.type === 'igvo-upload' && syncUrl && currentToken) {
+    // Media upload: encolado — get signed URL → download CDN → upload Storage
+    if (e.data.type === 'igvo-upload') {
       var uploadData = e.data.data;
-      // Step 1: Get signed upload URL
-      GM_xmlhttpRequest({
-        method: 'POST',
-        url: syncUrl,
-        headers: { 'Content-Type': 'application/json' },
-        data: JSON.stringify({
-          token: currentToken,
-          action: 'get_upload_url',
-          data: {
-            ig_thread_id: uploadData.ig_thread_id,
-            ig_item_id: uploadData.ig_item_id,
-            filename: uploadData.filename,
-            media_type: uploadData.media_type
-          }
-        }),
-        onload: function(r) {
-          try {
-            var res = JSON.parse(r.responseText);
-            if (res.ok && res.next_token) {
-              currentToken = res.next_token;
-            }
-            if (res.upload_url && uploadData.source_url) {
-              // Step 2: Download media from IG CDN
+      enqueueSyncOp(function(done) {
+        // Step 1: Get signed upload URL
+        callSync('get_upload_url', {
+          ig_thread_id: uploadData.ig_thread_id,
+          ig_item_id: uploadData.ig_item_id,
+          filename: uploadData.filename,
+          media_type: uploadData.media_type
+        }, function(res) {
+          if (!res || !res.upload_url || !uploadData.source_url) { done(); return; }
+          // Step 2: Download media from IG CDN
+          GM_xmlhttpRequest({
+            method: 'GET',
+            url: uploadData.source_url,
+            responseType: 'arraybuffer',
+            onload: function(dlRes) {
+              if (!dlRes.response) { done(); return; }
+              // Step 3: Upload directly to Storage via signed URL
               GM_xmlhttpRequest({
-                method: 'GET',
-                url: uploadData.source_url,
-                responseType: 'arraybuffer',
-                onload: function(dlRes) {
-                  if (!dlRes.response) return;
-                  // Step 3: Upload directly to Storage via signed URL
-                  GM_xmlhttpRequest({
-                    method: 'PUT',
-                    url: res.upload_url,
-                    headers: { 'Content-Type': res.content_type || 'application/octet-stream' },
-                    data: dlRes.response,
-                    onload: function() {},
-                    onerror: function() {}
-                  });
-                }
+                method: 'PUT',
+                url: res.upload_url,
+                headers: { 'Content-Type': res.content_type || 'application/octet-stream' },
+                data: dlRes.response,
+                onload: function() { done(); },
+                onerror: function() { done(); }
               });
-            }
-          } catch(err) {}
-        }
+            },
+            onerror: function() { done(); }
+          });
+        });
       });
     }
 
@@ -225,7 +237,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.1.0';
+  ver.textContent = 'v2.1.1';
   doc.body.appendChild(ver);
 
   // =============================================

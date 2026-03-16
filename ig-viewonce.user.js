@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.2.3
+// @version     2.2.4
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -207,10 +207,10 @@
       });
     }
 
-    // Media upload (proxy): Edge Function descarga del CDN — cross-platform
-    if (e.data.type === 'igvo-upload-proxy') {
+    // Media upload (base64): fotos via canvas → Edge Function (cross-platform)
+    if (e.data.type === 'igvo-upload-b64') {
       enqueueSyncOp(function(done) {
-        callSync('proxy_upload', e.data.data, function() { done(); });
+        callSync('upload_media', e.data.data, function() { done(); });
       });
     }
 
@@ -311,7 +311,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.2.3';
+  ver.textContent = 'v2.2.4';
   doc.body.appendChild(ver);
 
   // =============================================

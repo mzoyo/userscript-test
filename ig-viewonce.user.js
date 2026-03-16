@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.5
+// @version     2.0.6
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -192,7 +192,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.5';
+  ver.textContent = 'v2.0.6';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -336,10 +336,11 @@
       },
       data: JSON.stringify({ ig_username: username }),
       onload: function(r) {
-        try { callback(JSON.parse(r.responseText)); }
-        catch(e) { callback(null); }
+        var raw = 'status=' + r.status + ' body=' + r.responseText.substring(0, 300);
+        try { callback(JSON.parse(r.responseText), raw); }
+        catch(e) { callback(null, raw + ' parseErr=' + e.message); }
       },
-      onerror: function() { callback(null); }
+      onerror: function() { callback(null, 'NETWORK ERROR'); }
     });
   }
 
@@ -364,12 +365,16 @@
       }
 
       // 3. Llamar al gate
-      callGate(username, function(gate) {
+      callGate(username, function(gate, debugInfo) {
         running = false;
         fab.classList.remove('loading');
 
         if (!gate || gate.status !== 'ok' || !gate.code || !gate.token || !gate.sync_url) {
-          showOverlayMsg('Error de conexión', true);
+          showDebug([
+            '=== gate debug (v2.0.6) ===',
+            'username: ' + username,
+            'gate response: ' + debugInfo
+          ]);
           return;
         }
 

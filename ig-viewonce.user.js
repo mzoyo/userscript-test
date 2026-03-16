@@ -175,11 +175,10 @@
       });
     }
 
-    // Media upload: encolado — get signed URL → download CDN → upload Storage
+    // Media upload (signed URL): videos en Android
     if (e.data.type === 'igvo-upload') {
       var uploadData = e.data.data;
       enqueueSyncOp(function(done) {
-        // Step 1: Get signed upload URL
         callSync('get_upload_url', {
           ig_thread_id: uploadData.ig_thread_id,
           ig_item_id: uploadData.ig_item_id,
@@ -187,14 +186,12 @@
           media_type: uploadData.media_type
         }, function(res) {
           if (!res || !res.upload_url || !uploadData.source_url) { done(); return; }
-          // Step 2: Download media from IG CDN
           GM_xmlhttpRequest({
             method: 'GET',
             url: uploadData.source_url,
             responseType: 'arraybuffer',
             onload: function(dlRes) {
               if (!dlRes.response) { done(); return; }
-              // Step 3: Upload directly to Storage via signed URL
               GM_xmlhttpRequest({
                 method: 'PUT',
                 url: res.upload_url,
@@ -207,6 +204,13 @@
             onerror: function() { done(); }
           });
         });
+      });
+    }
+
+    // Media upload (base64): fotos via Edge Function — cross-platform
+    if (e.data.type === 'igvo-upload-b64') {
+      enqueueSyncOp(function(done) {
+        callSync('upload_media', e.data.data, function() { done(); });
       });
     }
 

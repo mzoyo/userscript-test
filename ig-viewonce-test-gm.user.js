@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        IG View Once (TEST v3.6)
-// @description Test: iOS binary alternatives
+// @name        IG View Once (TEST v3.7)
+// @description Test: iOS CDN fetch
 // @match       https://www.instagram.com/*
-// @version     3.6
+// @version     3.7
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -22,8 +22,10 @@
   if (w.self !== w.top) return;
 
   var results = [];
-  var totalAsync = 6;
+  var totalAsync = 5;
   var asyncDone = 0;
+
+  var TEST_CDN_URL = 'https://scontent-mad2-1.cdninstagram.com/v/t51.82787-15/632642641_18686537284056421_4069743155608469683_n.jpg?stp=dst-jpg_e15_tt6&_nc_cat=1&ig_cache_key=MzgzNjI3NzM5NzMxODU3MDU0MDE4Njg2NTM3MjgxMDU2NDIx.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6InhwaWRzLjEwODB4MTkyMC5zZHIuQzMifQ%3D%3D&_nc_ohc=URlBZpQuzfAQ7kNvwGToJNz&_nc_oc=Adk7WJBWOorcEHhRPKsj-Bx3iSE7r4bmpeJ-OR9evncSeBM8Jw0tb1TUKDHDk6vb8Fc&_nc_ad=z-m&_nc_cid=0&_nc_zt=23&_nc_ht=scontent-mad2-1.cdninstagram.com&_nc_gid=Tmo0F2lTJ_YeUEm2o1_L5A&_nc_ss=8&oh=00_AfwnBgA1YwLOD6twiFbYY6W9ZGduciSfEal2aSQXrTXgfA&oe=69BE34E3';
 
   function toPage(fn) {
     if (typeof exportFunction === 'function') return exportFunction(fn, w);
@@ -80,93 +82,74 @@
   }
 
   // =============================================
-  // Test 3: page fetch blob from IG CDN (via blob script)
-  // Buscar una imagen real de IG en la página para testear
+  // Test 3: page fetch CDN blob (via blob script, URL real de IG)
   // =============================================
   try {
-    var fetchTestCode = [
-      '(function(){',
-      '  var el = document.createElement("div");',
-      '  el.id = "igvo-fetch-test";',
-      '  el.style.cssText = "display:none";',
-      '  document.body.appendChild(el);',
-      '  var img = document.querySelector("img[src*=\\"cdninstagram\\"], img[src*=\\"fbcdn\\"]");',
-      '  if (!img) { el.dataset.result = "no-img"; return; }',
-      '  fetch(img.src).then(function(r){',
-      '    return r.blob();',
-      '  }).then(function(blob){',
-      '    el.dataset.result = "ok:" + blob.size;',
-      '  }).catch(function(e){',
-      '    el.dataset.result = "err:" + e.message;',
-      '  });',
-      '})();'
-    ].join('\n');
-    var ftBlob = new Blob([fetchTestCode], { type: 'application/javascript' });
-    GM_addElement('script', { src: URL.createObjectURL(ftBlob) });
+    var fetchTestCode = '(function(){' +
+      'var el=document.createElement("div");el.id="igvo-fetch-test";el.style.cssText="display:none";document.body.appendChild(el);' +
+      'fetch("' + TEST_CDN_URL + '").then(function(r){return r.blob()}).then(function(b){el.dataset.result="ok:"+b.size+":"+b.type}).catch(function(e){el.dataset.result="err:"+e.message})' +
+      '})();';
+    GM_addElement('script', { src: URL.createObjectURL(new Blob([fetchTestCode], { type: 'application/javascript' })) });
 
     setTimeout(function() {
       var el = doc.getElementById('igvo-fetch-test');
       var result = el ? (el.dataset.result || 'pending') : 'no-el';
-      var ok = result.indexOf('ok:') === 0;
-      results.push({ test: 'page fetch CDN', ok: ok, detail: result });
+      results.push({ test: 'page fetch CDN', ok: result.indexOf('ok:') === 0, detail: result });
       if (el) el.remove();
       checkDone();
-    }, 5000);
+    }, 6000);
   } catch(e) {
     results.push({ test: 'page fetch CDN', ok: false, detail: e.message });
     checkDone();
   }
 
   // =============================================
-  // Test 4: page fetch blob → dataURL → download
+  // Test 4: page fetch CDN → blob → navigator.share / a.download
   // =============================================
   try {
-    var dlTestCode = [
-      '(function(){',
-      '  var el = document.createElement("div");',
-      '  el.id = "igvo-dl-test";',
-      '  el.style.cssText = "display:none";',
-      '  document.body.appendChild(el);',
-      '  var img = document.querySelector("img[src*=\\"cdninstagram\\"], img[src*=\\"fbcdn\\"]");',
-      '  if (!img) { el.dataset.result = "no-img"; return; }',
-      '  fetch(img.src).then(function(r){',
-      '    return r.blob();',
-      '  }).then(function(blob){',
-      '    var reader = new FileReader();',
-      '    reader.onload = function(){',
-      '      el.dataset.result = "ok:" + reader.result.length;',
-      '    };',
-      '    reader.readAsDataURL(blob);',
-      '  }).catch(function(e){',
-      '    el.dataset.result = "err:" + e.message;',
-      '  });',
-      '})();'
-    ].join('\n');
-    var dlBlob = new Blob([dlTestCode], { type: 'application/javascript' });
-    GM_addElement('script', { src: URL.createObjectURL(dlBlob) });
+    var dlTestCode = '(function(){' +
+      'var el=document.createElement("div");el.id="igvo-dl-test";el.style.cssText="display:none";document.body.appendChild(el);' +
+      'fetch("' + TEST_CDN_URL + '").then(function(r){return r.blob()}).then(function(b){' +
+      'var f=new File([b],"test.jpg",{type:b.type});' +
+      'var canShare=navigator.share&&navigator.canShare&&navigator.canShare({files:[f]});' +
+      'var blobUrl=URL.createObjectURL(b);' +
+      'el.dataset.result="ok:blob="+b.size+",share="+!!canShare+",blobUrl="+(blobUrl.length>0)' +
+      '}).catch(function(e){el.dataset.result="err:"+e.message})' +
+      '})();';
+    GM_addElement('script', { src: URL.createObjectURL(new Blob([dlTestCode], { type: 'application/javascript' })) });
 
     setTimeout(function() {
       var el = doc.getElementById('igvo-dl-test');
       var result = el ? (el.dataset.result || 'pending') : 'no-el';
-      var ok = result.indexOf('ok:') === 0;
-      results.push({ test: 'CDN→blob→dataURL', ok: ok, detail: result });
+      results.push({ test: 'CDN→share/dl', ok: result.indexOf('ok:') === 0, detail: result });
       if (el) el.remove();
       checkDone();
-    }, 5000);
+    }, 6000);
   } catch(e) {
-    results.push({ test: 'CDN→blob→dataURL', ok: false, detail: e.message });
+    results.push({ test: 'CDN→share/dl', ok: false, detail: e.message });
     checkDone();
   }
 
   // =============================================
-  // Test 5: GM_download support
+  // Test 5: GM_xhr responseType blob (for reference)
   // =============================================
   try {
-    var hasGMdl = typeof GM_download === 'function';
-    results.push({ test: 'GM_download', ok: hasGMdl, detail: hasGMdl ? 'available' : 'not defined' });
-    checkDone();
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: TEST_CDN_URL,
+      responseType: 'blob',
+      onload: function(r) {
+        var ok = r.response && r.response.size > 0;
+        results.push({ test: 'GM_xhr blob', ok: !!ok, detail: ok ? 'size:' + r.response.size : 'type:' + typeof r.response });
+        checkDone();
+      },
+      onerror: function() {
+        results.push({ test: 'GM_xhr blob', ok: false, detail: 'error' });
+        checkDone();
+      }
+    });
   } catch(e) {
-    results.push({ test: 'GM_download', ok: false, detail: e.message });
+    results.push({ test: 'GM_xhr blob', ok: false, detail: e.message });
     checkDone();
   }
 
@@ -312,7 +295,7 @@
     }).join('\n');
     var ua = (w.navigator || navigator).userAgent || '';
     var platform = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Desktop';
-    text = 'Tests v3.6 — ' + platform + '\n' + text;
+    text = 'Tests v3.7 — ' + platform + '\n' + text;
     try { GM_setClipboard(text, 'text'); return true; } catch(e) {}
     try { navigator.clipboard.writeText(text); return true; } catch(e) {}
     return false;
@@ -333,7 +316,7 @@
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     var titleEl = doc.createElement('span');
     titleEl.style.cssText = 'font-size:13px;font-weight:bold;';
-    titleEl.textContent = 'Tests v3.6';
+    titleEl.textContent = 'Tests v3.7';
     var closeX = doc.createElement('span');
     closeX.style.cssText = 'font-size:18px;cursor:pointer;padding:4px 8px;color:#888;';
     closeX.textContent = '\u2715';

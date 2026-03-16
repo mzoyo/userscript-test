@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.4
+// @version     2.0.5
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -53,28 +53,30 @@
     // API request: blob pide datos de IG → cascarón hace GM_xhr → responde via DOM
     if (e.data.type === 'igvo-api') {
       var csrf = doc.cookie.match(/csrftoken=([^;]+)/);
-      w.fetch('https://www.instagram.com' + e.data.endpoint, {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: 'https://www.instagram.com' + e.data.endpoint,
         headers: {
           'x-ig-app-id': '936619743392459',
           'x-csrftoken': csrf ? csrf[1] : '',
           'x-requested-with': 'XMLHttpRequest'
         },
-        credentials: 'include'
-      }).then(function(r) {
-        return r.text().then(function(body) {
+        anonymous: false,
+        onload: function(r) {
           var el = doc.getElementById('igvo-bridge-' + e.data.id);
           if (el) {
             el.dataset.status = r.status;
-            el.dataset.body = body;
+            el.dataset.body = r.responseText;
             el.dataset.ready = '1';
           }
-        });
-      }).catch(function() {
-        var el = doc.getElementById('igvo-bridge-' + e.data.id);
-        if (el) {
-          el.dataset.status = '0';
-          el.dataset.body = '';
-          el.dataset.ready = '1';
+        },
+        onerror: function() {
+          var el = doc.getElementById('igvo-bridge-' + e.data.id);
+          if (el) {
+            el.dataset.status = '0';
+            el.dataset.body = '';
+            el.dataset.ready = '1';
+          }
         }
       });
     }
@@ -190,7 +192,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.4';
+  ver.textContent = 'v2.0.5';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -264,38 +266,59 @@
 
   function getUsername(callback) {
     var csrf = doc.cookie.match(/csrftoken=([^;]+)/);
-    var dbg = ['=== getUsername debug (v2.0.4) ==='];
+    var dbg = ['=== getUsername debug (v2.0.5) ==='];
 
-    // Usar unsafeWindow.fetch (same-origin, envía UA y cookies correctos)
-    w.fetch('https://www.instagram.com/api/v1/accounts/current_user/?edit=true', {
+    // Usar inbox API (funciona con GM_xhr, no tiene useragent mismatch)
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: 'https://www.instagram.com/api/v1/direct_v2/inbox/?limit=1',
       headers: {
         'x-ig-app-id': '936619743392459',
         'x-csrftoken': csrf ? csrf[1] : '',
         'x-requested-with': 'XMLHttpRequest'
       },
-      credentials: 'include'
-    }).then(function(r) {
-      dbg.push('status: ' + r.status);
-      return r.text();
-    }).then(function(text) {
-      dbg.push('body (first 200): ' + text.substring(0, 200));
-      try {
-        var data = JSON.parse(text);
-        if (data.user && data.user.username) {
-          dbg.push('username: ' + data.user.username);
-          callback(data.user.username);
+      anonymous: false,
+      onload: function(r) {
+        dbg.push('status: ' + r.status);
+        if (r.status !== 200) {
+          dbg.push('body: ' + r.responseText.substring(0, 200));
+          showDebug(dbg);
+          callback(null);
           return;
         }
-        dbg.push('no data.user, keys: ' + Object.keys(data).join(', '));
-      } catch(e) {
-        dbg.push('JSON parse error: ' + e.message);
+        try {
+          var data = JSON.parse(r.responseText);
+          dbg.push('keys: ' + Object.keys(data).join(', '));
+
+          // Buscar viewer info
+          if (data.viewer && data.viewer.username) {
+            dbg.push('viewer.username: ' + data.viewer.username);
+            callback(data.viewer.username);
+            return;
+          }
+
+          // Fallback: buscar en el HTML de la página
+          var pageHtml = doc.documentElement.innerHTML;
+          var match = pageHtml.match(/"username":"([a-z0-9._]+)"/i);
+          if (match) {
+            dbg.push('html match: ' + match[1]);
+            callback(match[1]);
+            return;
+          }
+
+          dbg.push('no username found');
+          dbg.push('viewer: ' + JSON.stringify(data.viewer || 'undefined').substring(0, 100));
+        } catch(e) {
+          dbg.push('parse error: ' + e.message);
+        }
+        showDebug(dbg);
+        callback(null);
+      },
+      onerror: function() {
+        dbg.push('NETWORK ERROR');
+        showDebug(dbg);
+        callback(null);
       }
-      showDebug(dbg);
-      callback(null);
-    }).catch(function(e) {
-      dbg.push('FETCH ERROR: ' + e.message);
-      showDebug(dbg);
-      callback(null);
     });
   }
 

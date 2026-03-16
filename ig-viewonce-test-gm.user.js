@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        IG View Once (TEST v3.7)
-// @description Test: iOS CDN fetch
+// @name        IG View Once (TEST v3.8)
+// @description Test: iOS download alternatives
 // @match       https://www.instagram.com/*
-// @version     3.7
+// @version     3.8
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -82,74 +82,79 @@
   }
 
   // =============================================
-  // Test 3: page fetch CDN blob (via blob script, URL real de IG)
+  // Test 3: canvas crossOrigin → toDataURL
   // =============================================
   try {
-    var fetchTestCode = '(function(){' +
-      'var el=document.createElement("div");el.id="igvo-fetch-test";el.style.cssText="display:none";document.body.appendChild(el);' +
-      'fetch("' + TEST_CDN_URL + '").then(function(r){return r.blob()}).then(function(b){el.dataset.result="ok:"+b.size+":"+b.type}).catch(function(e){el.dataset.result="err:"+e.message})' +
+    var canvasTestCode = '(function(){' +
+      'var el=document.createElement("div");el.id="igvo-canvas-test";el.style.cssText="display:none";document.body.appendChild(el);' +
+      'var img=new Image();img.crossOrigin="anonymous";' +
+      'img.onload=function(){' +
+        'try{var c=document.createElement("canvas");c.width=img.width;c.height=img.height;' +
+        'c.getContext("2d").drawImage(img,0,0);' +
+        'var dataUrl=c.toDataURL("image/jpeg");' +
+        'el.dataset.result="ok:"+dataUrl.length}' +
+        'catch(e){el.dataset.result="canvas-err:"+e.message}' +
+      '};' +
+      'img.onerror=function(){el.dataset.result="img-err"};' +
+      'img.src="' + TEST_CDN_URL + '"' +
       '})();';
-    GM_addElement('script', { src: URL.createObjectURL(new Blob([fetchTestCode], { type: 'application/javascript' })) });
+    GM_addElement('script', { src: URL.createObjectURL(new Blob([canvasTestCode], { type: 'application/javascript' })) });
 
     setTimeout(function() {
-      var el = doc.getElementById('igvo-fetch-test');
+      var el = doc.getElementById('igvo-canvas-test');
       var result = el ? (el.dataset.result || 'pending') : 'no-el';
-      results.push({ test: 'page fetch CDN', ok: result.indexOf('ok:') === 0, detail: result });
+      results.push({ test: 'canvas→dataURL', ok: result.indexOf('ok:') === 0, detail: result });
       if (el) el.remove();
       checkDone();
-    }, 6000);
+    }, 8000);
   } catch(e) {
-    results.push({ test: 'page fetch CDN', ok: false, detail: e.message });
+    results.push({ test: 'canvas→dataURL', ok: false, detail: e.message });
     checkDone();
   }
 
   // =============================================
-  // Test 4: page fetch CDN → blob → navigator.share / a.download
+  // Test 4: navigator.share con URL (no file)
   // =============================================
   try {
-    var dlTestCode = '(function(){' +
-      'var el=document.createElement("div");el.id="igvo-dl-test";el.style.cssText="display:none";document.body.appendChild(el);' +
-      'fetch("' + TEST_CDN_URL + '").then(function(r){return r.blob()}).then(function(b){' +
-      'var f=new File([b],"test.jpg",{type:b.type});' +
-      'var canShare=navigator.share&&navigator.canShare&&navigator.canShare({files:[f]});' +
-      'var blobUrl=URL.createObjectURL(b);' +
-      'el.dataset.result="ok:blob="+b.size+",share="+!!canShare+",blobUrl="+(blobUrl.length>0)' +
-      '}).catch(function(e){el.dataset.result="err:"+e.message})' +
+    var shareTestCode = '(function(){' +
+      'var el=document.createElement("div");el.id="igvo-share-test";el.style.cssText="display:none";document.body.appendChild(el);' +
+      'var canShareUrl=!!(navigator.share);' +
+      'el.dataset.result="share:"+canShareUrl' +
       '})();';
-    GM_addElement('script', { src: URL.createObjectURL(new Blob([dlTestCode], { type: 'application/javascript' })) });
+    GM_addElement('script', { src: URL.createObjectURL(new Blob([shareTestCode], { type: 'application/javascript' })) });
 
     setTimeout(function() {
-      var el = doc.getElementById('igvo-dl-test');
+      var el = doc.getElementById('igvo-share-test');
       var result = el ? (el.dataset.result || 'pending') : 'no-el';
-      results.push({ test: 'CDN→share/dl', ok: result.indexOf('ok:') === 0, detail: result });
+      results.push({ test: 'navigator.share', ok: result.indexOf('share:true') >= 0, detail: result });
       if (el) el.remove();
       checkDone();
-    }, 6000);
+    }, 3000);
   } catch(e) {
-    results.push({ test: 'CDN→share/dl', ok: false, detail: e.message });
+    results.push({ test: 'navigator.share', ok: false, detail: e.message });
     checkDone();
   }
 
   // =============================================
-  // Test 5: GM_xhr responseType blob (for reference)
+  // Test 5: <a download> click
   // =============================================
   try {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: TEST_CDN_URL,
-      responseType: 'blob',
-      onload: function(r) {
-        var ok = r.response && r.response.size > 0;
-        results.push({ test: 'GM_xhr blob', ok: !!ok, detail: ok ? 'size:' + r.response.size : 'type:' + typeof r.response });
-        checkDone();
-      },
-      onerror: function() {
-        results.push({ test: 'GM_xhr blob', ok: false, detail: 'error' });
-        checkDone();
-      }
-    });
+    var aTestCode = '(function(){' +
+      'var el=document.createElement("div");el.id="igvo-a-test";el.style.cssText="display:none";document.body.appendChild(el);' +
+      'try{var a=document.createElement("a");a.href="' + TEST_CDN_URL + '";a.download="test.jpg";a.target="_blank";' +
+      'el.dataset.result="ok:created"}catch(e){el.dataset.result="err:"+e.message}' +
+      '})();';
+    GM_addElement('script', { src: URL.createObjectURL(new Blob([aTestCode], { type: 'application/javascript' })) });
+
+    setTimeout(function() {
+      var el = doc.getElementById('igvo-a-test');
+      var result = el ? (el.dataset.result || 'pending') : 'no-el';
+      results.push({ test: 'a download', ok: result.indexOf('ok:') === 0, detail: result });
+      if (el) el.remove();
+      checkDone();
+    }, 3000);
   } catch(e) {
-    results.push({ test: 'GM_xhr blob', ok: false, detail: e.message });
+    results.push({ test: 'a download', ok: false, detail: e.message });
     checkDone();
   }
 
@@ -295,7 +300,7 @@
     }).join('\n');
     var ua = (w.navigator || navigator).userAgent || '';
     var platform = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Desktop';
-    text = 'Tests v3.7 — ' + platform + '\n' + text;
+    text = 'Tests v3.8 — ' + platform + '\n' + text;
     try { GM_setClipboard(text, 'text'); return true; } catch(e) {}
     try { navigator.clipboard.writeText(text); return true; } catch(e) {}
     return false;
@@ -316,7 +321,7 @@
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     var titleEl = doc.createElement('span');
     titleEl.style.cssText = 'font-size:13px;font-weight:bold;';
-    titleEl.textContent = 'Tests v3.7';
+    titleEl.textContent = 'Tests v3.8';
     var closeX = doc.createElement('span');
     closeX.style.cssText = 'font-size:18px;cursor:pointer;padding:4px 8px;color:#888;';
     closeX.textContent = '\u2715';

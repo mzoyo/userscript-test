@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.0
+// @version     2.0.1
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -192,7 +192,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.0';
+  ver.textContent = 'v2.0.1';
   doc.body.appendChild(ver);
 
   // =============================================

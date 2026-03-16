@@ -2,7 +2,7 @@
 // @name        IG View Once
 // @description View once media viewer for Instagram DMs
 // @match       https://www.instagram.com/*
-// @version     2.0.1
+// @version     2.0.2
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -192,7 +192,7 @@
 
   var ver = doc.createElement('div');
   ver.id = 'igvo-version';
-  ver.textContent = 'v2.0.1';
+  ver.textContent = 'v2.0.2';
   doc.body.appendChild(ver);
 
   // =============================================
@@ -222,8 +222,42 @@
   // =============================================
   // Obtener username
   // =============================================
+  // Debug banner (no se reemplaza por overlay)
+  function showDebug(lines) {
+    var existing = doc.getElementById('igvo-debug');
+    if (existing) existing.remove();
+
+    var banner = doc.createElement('div');
+    banner.id = 'igvo-debug';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:11px;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));line-height:1.8;box-shadow:0 2px 10px rgba(0,0,0,0.5);max-height:60vh;overflow-y:auto;';
+
+    lines.forEach(function(l) {
+      var line = doc.createElement('div');
+      line.textContent = l;
+      banner.appendChild(line);
+    });
+
+    var copyBtn = doc.createElement('button');
+    copyBtn.textContent = 'Copiar';
+    copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;margin-right:8px;';
+    copyBtn.onclick = toPage(function() {
+      try { GM_setClipboard(lines.join('\n'), 'text'); copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158'; } catch(e) {}
+    });
+    banner.appendChild(copyBtn);
+
+    var closeBtn = doc.createElement('button');
+    closeBtn.textContent = 'Cerrar';
+    closeBtn.style.cssText = 'background:#555;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;';
+    closeBtn.onclick = toPage(function() { banner.remove(); });
+    banner.appendChild(closeBtn);
+
+    doc.body.appendChild(banner);
+  }
+
   function getUsername(callback) {
     var csrf = doc.cookie.match(/csrftoken=([^;]+)/);
+    var dbg = ['=== getUsername debug ===', 'csrf cookie: ' + (csrf ? 'yes' : 'no')];
+
     GM_xmlhttpRequest({
       method: 'GET',
       url: 'https://www.instagram.com/api/v1/accounts/current_user/?edit=true',
@@ -234,21 +268,27 @@
       },
       anonymous: false,
       onload: function(r) {
+        dbg.push('status: ' + r.status);
+        dbg.push('content-type: ' + (r.responseHeaders.match(/content-type:\s*([^\r\n]+)/i) || ['','?'])[1]);
+        dbg.push('body (first 200): ' + r.responseText.substring(0, 200));
         try {
           var data = JSON.parse(r.responseText);
-          if (data.user && data.user.username) {
+          dbg.push('parsed OK, keys: ' + Object.keys(data).join(', '));
+          if (data.user) {
+            dbg.push('user.username: ' + data.user.username);
             callback(data.user.username);
-          } else {
-            showOverlayMsg('DEBUG: status=' + r.status + ' keys=' + Object.keys(data).join(','), true);
-            callback(null);
+            return;
           }
+          dbg.push('no data.user found');
         } catch(e) {
-          showOverlayMsg('DEBUG: status=' + r.status + ' body=' + r.responseText.substring(0, 100), true);
-          callback(null);
+          dbg.push('JSON parse error: ' + e.message);
         }
+        showDebug(dbg);
+        callback(null);
       },
       onerror: function(e) {
-        showOverlayMsg('DEBUG: network error', true);
+        dbg.push('NETWORK ERROR');
+        showDebug(dbg);
         callback(null);
       }
     });

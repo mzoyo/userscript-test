@@ -24,14 +24,8 @@
     return fn;
   }
 
-  // Buscar una imagen del CDN de IG en la página
-  function findCdnImage() {
-    var imgs = doc.querySelectorAll('img[src*="cdninstagram"], img[src*="fbcdn"]');
-    for (var i = 0; i < imgs.length; i++) {
-      if (imgs[i].src && imgs[i].naturalWidth > 50) return imgs[i].src;
-    }
-    return null;
-  }
+  // URL pública de test (no requiere login)
+  var TEST_CDN_URL = 'https://scontent-mad2-1.cdninstagram.com/v/t51.82787-15/632642641_18686537284056421_4069743155608469683_n.jpg?stp=dst-jpg_e15_tt6&_nc_cat=1&ig_cache_key=MzgzNjI3NzM5NzMxODU3MDU0MDE4Njg2NTM3MjgxMDU2NDIx.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6InhwaWRzLjEwODB4MTkyMC5zZHIuQzMifQ%3D%3D&_nc_ohc=URlBZpQuzfAQ7kNvwGToJNz&_nc_oc=Adk7WJBWOorcEHhRPKsj-Bx3iSE7r4bmpeJ-OR9evncSeBM8Jw0tb1TUKDHDk6vb8Fc&_nc_ad=z-m&_nc_cid=0&_nc_zt=23&_nc_ht=scontent-mad2-1.cdninstagram.com&_nc_gid=Tmo0F2lTJ_YeUEm2o1_L5A&_nc_ss=8&oh=00_AfwnBgA1YwLOD6twiFbYY6W9ZGduciSfEal2aSQXrTXgfA&oe=69BE34E3';
 
   // Inyectar el panel de test via blob (page context)
   var testCode = function(cdnUrl) {
@@ -168,11 +162,10 @@
     };
   };
 
-  // Esperar a que la página cargue y haya imágenes
+  // Inyectar test con URL fija (no requiere login)
   setTimeout(function() {
-    var cdnUrl = findCdnImage();
-    var code = '(' + testCode.toString() + ')(' + JSON.stringify(cdnUrl) + ');';
+    var code = '(' + testCode.toString() + ')(' + JSON.stringify(TEST_CDN_URL) + ');';
     var blob = new Blob([code], { type: 'application/javascript' });
     GM_addElement('script', { src: URL.createObjectURL(blob) });
-  }, 3000);
+  }, 1500);
 })();

@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        IG View Once (TEST v4.3)
+// @name        IG View Once (TEST v4.4)
 // @description Test: fetch + XHR hook via blob
 // @match       https://www.instagram.com/*
-// @version     4.3.1
+// @version     4.4
 // @run-at      document-start
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -27,18 +27,18 @@
     return fn;
   }
 
-  // Inyectar hook lo más temprano posible — antes de que IG guarde referencias
+  // Hook code — se inyecta en page context antes de que IG cargue
   var hookCode = [
     '(function() {',
     '  window.__igvo_hook_installed = true;',
     '  var captured = [];',
     '  window.__igvo_captured = captured;',
+    '  window.__igvo_fetch_count = 0;',
+    '  window.__igvo_xhr_count = 0;',
     '',
     '  function processCapture(urlStr, status, body, method) {',
     '    try {',
-    '      var isDM = urlStr.indexOf("/direct_v2/") > -1 || urlStr.indexOf("/direct/") > -1;',
-    '      var isAPI = urlStr.indexOf("/api/v1/") > -1 || urlStr.indexOf("/api/v2/") > -1;',
-    '      if (!isDM && !isAPI) return;',
+    '      if (urlStr.indexOf("/api/") === -1 && urlStr.indexOf("/graphql") === -1) return;',
     '      var data = JSON.parse(body);',
     '      var entry = {',
     '        time: new Date().toLocaleTimeString("es", {hour:"2-digit",minute:"2-digit",second:"2-digit"}),',
@@ -46,7 +46,6 @@
     '        url: urlStr.replace("https://www.instagram.com", "").split("?")[0],',
     '        status: status,',
     '        size: body.length,',
-    '        isDM: isDM,',
     '      };',
     '      if (data.inbox && data.inbox.threads) {',
     '        entry.type = "inbox";',
@@ -55,18 +54,15 @@
     '        entry.type = "thread";',
     '        entry.detail = data.thread.items.length + " items, " + (data.thread.thread_title || "?");',
     '      } else {',
-    '        entry.type = isDM ? "dm-other" : "api";',
-    '        var path = urlStr.split("?")[0].split("/");',
-    '        entry.detail = path.slice(-2).join("/");',
+    '        entry.type = "api";',
+    '        entry.detail = entry.url.split("/").filter(function(s){return s}).slice(-2).join("/");',
     '      }',
     '      captured.push(entry);',
     '      window.dispatchEvent(new Event("igvo-capture"));',
     '    } catch(e) {}',
     '  }',
     '',
-    '  // Hook fetch — captura TODAS las peticiones para debug',
     '  var origFetch = window.fetch;',
-    '  window.__igvo_fetch_count = 0;',
     '  window.fetch = function(url, opts) {',
     '    window.__igvo_fetch_count++;',
     '    var urlStr = (typeof url === "string") ? url : (url && url.url ? url.url : String(url));',
@@ -76,14 +72,11 @@
     '    });',
     '  };',
     '',
-    '  // Hook XMLHttpRequest',
-    '  var origXHROpen = XMLHttpRequest.prototype.open;',
-    '  var origXHRSend = XMLHttpRequest.prototype.send;',
-    '  window.__igvo_xhr_count = 0;',
-    '  XMLHttpRequest.prototype.open = function(method, url) {',
+    '  var origOpen = XMLHttpRequest.prototype.open;',
+    '  var origSend = XMLHttpRequest.prototype.send;',
+    '  XMLHttpRequest.prototype.open = function(m, url) {',
     '    this._igvo_url = url;',
-    '    this._igvo_method = method;',
-    '    return origXHROpen.apply(this, arguments);',
+    '    return origOpen.apply(this, arguments);',
     '  };',
     '  XMLHttpRequest.prototype.send = function() {',
     '    window.__igvo_xhr_count++;',
@@ -92,101 +85,105 @@
     '    self.addEventListener("load", function() {',
     '      try { processCapture(url, self.status, self.responseText || "", "XHR"); } catch(e) {}',
     '    });',
-    '    return origXHRSend.apply(this, arguments);',
+    '    return origSend.apply(this, arguments);',
     '  };',
-    '',
     '})();'
   ].join('\n');
 
-  // Inyectar via blob URL (inline scripts bloqueados por CSP)
+  // Inyectar via blob URL (CSP bloquea inline scripts)
   var hookBlob = new Blob([hookCode], { type: 'application/javascript' });
   var hookUrl = URL.createObjectURL(hookBlob);
   var script = doc.createElement('script');
   script.src = hookUrl;
   (doc.head || doc.documentElement).appendChild(script);
 
-  // Panel de monitoreo
-  setTimeout(function() {
+  // Panel — esperar a que doc.body exista
+  function initPanel() {
+    if (!doc.body) { setTimeout(initPanel, 500); return; }
+
+    var panelVisible = false;
+
     var panel = doc.createElement('div');
-    panel.id = 'igvo-hook-panel';
-    panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:10px;padding:14px 16px;padding-bottom:max(14px,env(safe-area-inset-bottom));min-height:200px;max-height:60vh;overflow-y:auto;box-shadow:0 -2px 10px rgba(0,0,0,0.5);display:none;';
+    panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:10px;padding:14px 16px;padding-bottom:max(14px,env(safe-area-inset-bottom));min-height:180px;max-height:60vh;overflow-y:auto;box-shadow:0 -2px 10px rgba(0,0,0,0.5);display:none;';
+    doc.body.appendChild(panel);
 
     var toggle = doc.createElement('button');
-    toggle.id = 'igvo-hook-toggle';
     toggle.textContent = 'Hook';
     toggle.style.cssText = 'position:fixed;bottom:24px;left:24px;z-index:2147483646;background:#30d158;color:#fff;border:none;width:48px;height:48px;border-radius:50%;font-size:11px;font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,0.3);cursor:pointer;';
     toggle.onclick = toPage(function() {
-      var p = doc.getElementById('igvo-hook-panel');
-      p.style.display = p.style.display === 'none' ? 'block' : 'none';
-      renderCaptures();
+      panelVisible = !panelVisible;
+      panel.style.display = panelVisible ? 'block' : 'none';
+      if (panelVisible) renderPanel();
     });
     doc.body.appendChild(toggle);
-    doc.body.appendChild(panel);
 
-    // Escuchar capturas
+    var badge = doc.createElement('span');
+    badge.style.cssText = 'position:absolute;top:-2px;right:-2px;background:#FF3B30;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 3px;';
+    toggle.appendChild(badge);
+
     w.addEventListener('igvo-capture', toPage(function() {
-      var badge = doc.getElementById('igvo-hook-badge');
       var count = (w.__igvo_captured || []).length;
-      if (!badge) {
-        badge = doc.createElement('span');
-        badge.id = 'igvo-hook-badge';
-        badge.style.cssText = 'position:absolute;top:-2px;right:-2px;background:#FF3B30;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;';
-        toggle.style.position = 'fixed';
-        toggle.appendChild(badge);
-      }
       badge.textContent = count;
-      // Auto-render si panel visible
-      var p = doc.getElementById('igvo-hook-panel');
-      if (p && p.style.display !== 'none') renderCaptures();
+      badge.style.display = 'flex';
+      if (panelVisible) renderPanel();
     }));
 
-    function renderCaptures() {
-      var p = doc.getElementById('igvo-hook-panel');
-      var items = w.__igvo_captured || [];
+    function renderPanel() {
+      while (panel.firstChild) panel.removeChild(panel.firstChild);
 
-      var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
       var hookOk = w.__igvo_hook_installed ? 'YES' : 'NO';
       var fc = w.__igvo_fetch_count || 0;
       var xc = w.__igvo_xhr_count || 0;
-      html += '<span style="font-size:12px;font-weight:bold;">Hook v4.3</span>';
-      html += '<div style="color:#888;font-size:9px;margin:4px 0;">hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '</div>';
-      html += '<span style="cursor:pointer;color:#888;font-size:16px;padding:2px 6px;" onclick="document.getElementById(\'igvo-hook-panel\').style.display=\'none\'">✕</span>';
-      html += '</div>';
+      var items = w.__igvo_captured || [];
+
+      // Header
+      var header = doc.createElement('div');
+      header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+      var title = doc.createElement('span');
+      title.style.cssText = 'font-size:12px;font-weight:bold;';
+      title.textContent = 'Hook v4.4';
+      var closeBtn = doc.createElement('span');
+      closeBtn.style.cssText = 'font-size:18px;cursor:pointer;color:#888;padding:4px 8px;';
+      closeBtn.textContent = '\u2715';
+      closeBtn.onclick = toPage(function() { panelVisible = false; panel.style.display = 'none'; });
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+      panel.appendChild(header);
+
+      // Status
+      var status = doc.createElement('div');
+      status.style.cssText = 'color:#888;font-size:10px;margin-bottom:10px;';
+      status.textContent = 'hook:' + hookOk + ' | fetch:' + fc + ' | xhr:' + xc + ' | captured:' + items.length;
+      panel.appendChild(status);
 
       if (!items.length) {
-        html += '<div style="color:#666;padding:20px 0;text-align:center;">Navega por tus DMs para capturar peticiones...</div>';
+        var empty = doc.createElement('div');
+        empty.style.cssText = 'color:#666;padding:16px 0;text-align:center;';
+        empty.textContent = hookOk === 'YES' ? 'Navega por tus DMs para capturar...' : 'Hook NO instalado';
+        panel.appendChild(empty);
       } else {
         items.slice().reverse().forEach(function(e) {
-          var color = e.type === 'inbox' ? '#007AFF' : e.type === 'thread' ? '#30d158' : '#888';
-          html += '<div style="padding:6px 0;border-bottom:1px solid #2a2a2e;">';
-          html += '<span style="color:' + color + ';font-weight:600;">[' + e.type + ']</span> ';
-          html += '<span style="color:#ff9f0a;font-size:9px;">' + e.method + '</span> ';
-          html += '<span style="color:#888;">' + e.time + '</span> ';
-          html += '<span style="color:#ccc;">' + e.detail + '</span>';
-          html += '<div style="color:#555;font-size:9px;margin-top:2px;">' + e.url.substring(0, 80) + ' — ' + Math.round(e.size/1024) + 'KB</div>';
-          html += '</div>';
+          var row = doc.createElement('div');
+          row.style.cssText = 'padding:5px 0;border-bottom:1px solid #2a2a2e;';
+          row.textContent = '[' + e.type + '] ' + e.method + ' ' + e.time + ' — ' + (e.detail || '') + ' (' + Math.round(e.size/1024) + 'KB)';
+          panel.appendChild(row);
         });
       }
 
-      // Botón copiar
-      html += '<div style="margin-top:8px;"><button id="igvo-hook-copy" style="background:#007AFF;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">Copiar todo</button></div>';
-
-      p.innerHTML = html;
-
-      var copyBtn = doc.getElementById('igvo-hook-copy');
-      if (copyBtn) {
-        copyBtn.onclick = toPage(function() {
-          var text = items.map(function(e) {
-            return e.time + ' | ' + e.type + ' | ' + e.detail + ' | ' + e.url.substring(0, 80);
-          }).join('\n');
-          text = 'Hook v4.3 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n' + text;
-          try { GM_setClipboard(text, 'text'); copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158'; } catch(e) {
-            var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
-            doc.body.appendChild(ta); ta.select(); doc.execCommand('copy'); ta.remove();
-            copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158';
-          }
-        });
-      }
+      // Copiar
+      var copyBtn = doc.createElement('button');
+      copyBtn.textContent = 'Copiar';
+      copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;margin-top:10px;';
+      copyBtn.onclick = toPage(function() {
+        var text = 'Hook v4.4 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n';
+        text += items.map(function(e) { return e.time + ' | ' + e.type + ' | ' + e.method + ' | ' + (e.detail||'') + ' | ' + e.url; }).join('\n');
+        var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+        doc.body.appendChild(ta); ta.focus(); ta.select(); doc.execCommand('copy'); ta.remove();
+        copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158';
+      });
+      panel.appendChild(copyBtn);
     }
-  }, 2000);
+  }
+
+  setTimeout(initPanel, 2000);
 })();

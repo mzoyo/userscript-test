@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        IG View Once (TEST v4.0)
-// @description Test: iOS download methods
+// @name        IG View Once (TEST v4.1)
+// @description Test: fetch hooking — intercept IG API calls
 // @match       https://www.instagram.com/*
-// @version     4.0
+// @version     4.1
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -19,153 +19,146 @@
   var doc = w.document;
   if (w.self !== w.top) return;
 
+  var _p = w.location.pathname;
+  if (_p.indexOf('/accounts/') === 0 || _p.indexOf('/challenge/') === 0) return;
+
   function toPage(fn) {
     if (typeof exportFunction === 'function') return exportFunction(fn, w);
     return fn;
   }
 
-  // URL pública de test (no requiere login)
-  var TEST_CDN_URL = 'https://scontent-mad2-1.cdninstagram.com/v/t51.82787-15/632642641_18686537284056421_4069743155608469683_n.jpg?stp=dst-jpg_e15_tt6&_nc_cat=1&ig_cache_key=MzgzNjI3NzM5NzMxODU3MDU0MDE4Njg2NTM3MjgxMDU2NDIx.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6InhwaWRzLjEwODB4MTkyMC5zZHIuQzMifQ%3D%3D&_nc_ohc=URlBZpQuzfAQ7kNvwGToJNz&_nc_oc=Adk7WJBWOorcEHhRPKsj-Bx3iSE7r4bmpeJ-OR9evncSeBM8Jw0tb1TUKDHDk6vb8Fc&_nc_ad=z-m&_nc_cid=0&_nc_zt=23&_nc_ht=scontent-mad2-1.cdninstagram.com&_nc_gid=Tmo0F2lTJ_YeUEm2o1_L5A&_nc_ss=8&oh=00_AfwnBgA1YwLOD6twiFbYY6W9ZGduciSfEal2aSQXrTXgfA&oe=69BE34E3';
+  // Inyectar el hook via blob (page context)
+  var hookCode = [
+    '(function() {',
+    '  var captured = [];',
+    '  var originalFetch = window.fetch;',
+    '',
+    '  window.fetch = function(url, opts) {',
+    '    var urlStr = (typeof url === "string") ? url : (url && url.url ? url.url : String(url));',
+    '    return originalFetch.apply(this, arguments).then(function(response) {',
+    '      // Solo interceptar APIs de DM',
+    '      if (urlStr.indexOf("/direct_v2/") > -1 || urlStr.indexOf("/direct/") > -1) {',
+    '        response.clone().text().then(function(body) {',
+    '          try {',
+    '            var data = JSON.parse(body);',
+    '            var entry = {',
+    '              time: new Date().toLocaleTimeString("es", {hour:"2-digit",minute:"2-digit",second:"2-digit"}),',
+    '              url: urlStr.replace("https://www.instagram.com", ""),',
+    '              status: response.status,',
+    '              size: body.length,',
+    '              keys: Object.keys(data).join(","),',
+    '            };',
+    '',
+    '            // Extraer info útil según el endpoint',
+    '            if (data.inbox && data.inbox.threads) {',
+    '              entry.type = "inbox";',
+    '              entry.detail = data.inbox.threads.length + " threads";',
+    '            } else if (data.thread && data.thread.items) {',
+    '              entry.type = "thread";',
+    '              entry.detail = data.thread.items.length + " items, title: " + (data.thread.thread_title || "?");',
+    '              // Contar view-once',
+    '              var vo = data.thread.items.filter(function(i) {',
+    '                return (i.item_type === "raven_media" || i.item_type === "visual_media") && !i.is_sent_by_viewer;',
+    '              });',
+    '              if (vo.length) entry.detail += ", " + vo.length + " view-once";',
+    '            } else {',
+    '              entry.type = "other";',
+    '              entry.detail = urlStr.split("?")[0].split("/").pop();',
+    '            }',
+    '',
+    '            captured.push(entry);',
+    '            window.__igvo_captured = captured;',
+    '            window.dispatchEvent(new Event("igvo-capture"));',
+    '          } catch(e) {}',
+    '        });',
+    '      }',
+    '      return response;',
+    '    });',
+    '  };',
+    '',
+    '  window.__igvo_captured = captured;',
+    '})();'
+  ].join('\n');
 
-  // Inyectar el panel de test via blob (page context)
-  var testCode = function(cdnUrl) {
-    var panel = document.createElement('div');
-    panel.id = 'igvo-dl-test-panel';
-    panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:11px;padding:12px 16px;padding-bottom:max(12px,env(safe-area-inset-bottom));max-height:70vh;overflow-y:auto;box-shadow:0 -2px 10px rgba(0,0,0,0.5);';
+  GM_addElement('script', { src: URL.createObjectURL(new Blob([hookCode], { type: 'application/javascript' })) });
 
-    var log = [];
-    function addLog(msg) {
-      log.push(msg);
-      renderLog();
-    }
-    function renderLog() {
-      var logDiv = document.getElementById('igvo-dl-log');
-      if (logDiv) logDiv.innerHTML = log.map(function(l) { return '<div>' + l + '</div>'; }).join('');
-    }
-
-    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
-    html += '<span style="font-size:13px;font-weight:bold;">Download Tests v4.0</span>';
-    html += '<span id="igvo-dl-close" style="font-size:18px;cursor:pointer;color:#888;padding:4px 8px;">✕</span>';
-    html += '</div>';
-    html += '<div style="margin-bottom:8px;font-size:10px;color:#888;">CDN: ' + (cdnUrl ? cdnUrl.substring(0, 60) + '...' : 'no encontrada') + '</div>';
-    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
-    html += '<button id="igvo-t1" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">1. fetch→share</button>';
-    html += '<button id="igvo-t2" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">2. fetch→a.dl</button>';
-    html += '<button id="igvo-t3" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">3. canvas→share</button>';
-    html += '<button id="igvo-t4" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">4. canvas→a.dl</button>';
-    html += '<button id="igvo-t5" style="background:#30d158;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">5. window.open</button>';
-    html += '</div>';
-    html += '<div id="igvo-dl-log" style="font-size:10px;line-height:1.6;"></div>';
-
-    panel.innerHTML = html;
-    document.body.appendChild(panel);
-
-    document.getElementById('igvo-dl-close').onclick = function() { panel.remove(); };
-
-    if (!cdnUrl) { addLog('ERROR: no CDN image found on page'); return; }
-
-    // Test 1: fetch → blob → navigator.share (con File)
-    document.getElementById('igvo-t1').onclick = function() {
-      addLog('T1: fetching...');
-      fetch(cdnUrl).then(function(r) {
-        addLog('T1: status ' + r.status);
-        return r.blob();
-      }).then(function(blob) {
-        addLog('T1: blob ' + blob.size + ' bytes, type: ' + blob.type);
-        var file = new File([blob], 'test_photo.jpg', { type: blob.type || 'image/jpeg' });
-        var canShare = navigator.canShare && navigator.canShare({ files: [file] });
-        addLog('T1: canShare: ' + canShare);
-        if (canShare) {
-          return navigator.share({ files: [file] });
-        } else {
-          addLog('T1: canShare=false, skipped');
-        }
-      }).then(function() {
-        addLog('T1: share OK');
-      }).catch(function(e) {
-        addLog('T1: ERROR ' + e.message);
-      });
-    };
-
-    // Test 2: fetch → blob → <a download>
-    document.getElementById('igvo-t2').onclick = function() {
-      addLog('T2: fetching...');
-      fetch(cdnUrl).then(function(r) { return r.blob(); }).then(function(blob) {
-        addLog('T2: blob ' + blob.size);
-        var blobUrl = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = 'test_photo.jpg';
-        a.click();
-        addLog('T2: a.click() done');
-        setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
-      }).catch(function(e) {
-        addLog('T2: ERROR ' + e.message);
-      });
-    };
-
-    // Test 3: canvas crossOrigin → blob → navigator.share
-    document.getElementById('igvo-t3').onclick = function() {
-      addLog('T3: loading img...');
-      var img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = function() {
-        addLog('T3: img loaded ' + img.width + 'x' + img.height);
-        var c = document.createElement('canvas');
-        c.width = img.width; c.height = img.height;
-        c.getContext('2d').drawImage(img, 0, 0);
-        c.toBlob(function(blob) {
-          addLog('T3: blob ' + blob.size);
-          var file = new File([blob], 'test_photo.jpg', { type: 'image/jpeg' });
-          var canShare = navigator.canShare && navigator.canShare({ files: [file] });
-          addLog('T3: canShare: ' + canShare);
-          if (canShare) {
-            navigator.share({ files: [file] }).then(function() {
-              addLog('T3: share OK');
-            }).catch(function(e) { addLog('T3: share ERROR ' + e.message); });
-          }
-        }, 'image/jpeg', 0.95);
-      };
-      img.onerror = function() { addLog('T3: img load ERROR'); };
-      img.src = cdnUrl;
-    };
-
-    // Test 4: canvas → blob → <a download>
-    document.getElementById('igvo-t4').onclick = function() {
-      addLog('T4: loading img...');
-      var img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = function() {
-        var c = document.createElement('canvas');
-        c.width = img.width; c.height = img.height;
-        c.getContext('2d').drawImage(img, 0, 0);
-        c.toBlob(function(blob) {
-          addLog('T4: blob ' + blob.size);
-          var blobUrl = URL.createObjectURL(blob);
-          var a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = 'test_photo.jpg';
-          a.click();
-          addLog('T4: a.click() done');
-          setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
-        }, 'image/jpeg', 0.95);
-      };
-      img.onerror = function() { addLog('T4: img ERROR'); };
-      img.src = cdnUrl;
-    };
-
-    // Test 5: window.open (siempre funciona)
-    document.getElementById('igvo-t5').onclick = function() {
-      addLog('T5: opening...');
-      window.open(cdnUrl, '_blank');
-      addLog('T5: done');
-    };
-  };
-
-  // Inyectar test con URL fija (no requiere login)
+  // Panel de monitoreo
   setTimeout(function() {
-    var code = '(' + testCode.toString() + ')(' + JSON.stringify(TEST_CDN_URL) + ');';
-    var blob = new Blob([code], { type: 'application/javascript' });
-    GM_addElement('script', { src: URL.createObjectURL(blob) });
-  }, 1500);
+    var panel = doc.createElement('div');
+    panel.id = 'igvo-hook-panel';
+    panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:10px;padding:10px 14px;padding-bottom:max(10px,env(safe-area-inset-bottom));max-height:50vh;overflow-y:auto;box-shadow:0 -2px 10px rgba(0,0,0,0.5);display:none;';
+
+    var toggle = doc.createElement('button');
+    toggle.id = 'igvo-hook-toggle';
+    toggle.textContent = 'Hook';
+    toggle.style.cssText = 'position:fixed;bottom:24px;left:24px;z-index:2147483646;background:#30d158;color:#fff;border:none;width:48px;height:48px;border-radius:50%;font-size:11px;font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,0.3);cursor:pointer;';
+    toggle.onclick = toPage(function() {
+      var p = doc.getElementById('igvo-hook-panel');
+      p.style.display = p.style.display === 'none' ? 'block' : 'none';
+      renderCaptures();
+    });
+    doc.body.appendChild(toggle);
+    doc.body.appendChild(panel);
+
+    // Escuchar capturas
+    w.addEventListener('igvo-capture', toPage(function() {
+      var badge = doc.getElementById('igvo-hook-badge');
+      var count = (w.__igvo_captured || []).length;
+      if (!badge) {
+        badge = doc.createElement('span');
+        badge.id = 'igvo-hook-badge';
+        badge.style.cssText = 'position:absolute;top:-2px;right:-2px;background:#FF3B30;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;';
+        toggle.style.position = 'fixed';
+        toggle.appendChild(badge);
+      }
+      badge.textContent = count;
+      // Auto-render si panel visible
+      var p = doc.getElementById('igvo-hook-panel');
+      if (p && p.style.display !== 'none') renderCaptures();
+    }));
+
+    function renderCaptures() {
+      var p = doc.getElementById('igvo-hook-panel');
+      var items = w.__igvo_captured || [];
+
+      var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+      html += '<span style="font-size:12px;font-weight:bold;">Fetch Hook v4.1 — ' + items.length + ' captured</span>';
+      html += '<span style="cursor:pointer;color:#888;font-size:16px;padding:2px 6px;" onclick="document.getElementById(\'igvo-hook-panel\').style.display=\'none\'">✕</span>';
+      html += '</div>';
+
+      if (!items.length) {
+        html += '<div style="color:#666;padding:20px 0;text-align:center;">Navega por tus DMs para capturar peticiones...</div>';
+      } else {
+        items.slice().reverse().forEach(function(e) {
+          var color = e.type === 'inbox' ? '#007AFF' : e.type === 'thread' ? '#30d158' : '#888';
+          html += '<div style="padding:6px 0;border-bottom:1px solid #2a2a2e;">';
+          html += '<span style="color:' + color + ';font-weight:600;">[' + e.type + ']</span> ';
+          html += '<span style="color:#888;">' + e.time + '</span> ';
+          html += '<span style="color:#ccc;">' + e.detail + '</span>';
+          html += '<div style="color:#555;font-size:9px;margin-top:2px;">' + e.url.substring(0, 80) + ' — ' + Math.round(e.size/1024) + 'KB</div>';
+          html += '</div>';
+        });
+      }
+
+      // Botón copiar
+      html += '<div style="margin-top:8px;"><button id="igvo-hook-copy" style="background:#007AFF;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">Copiar todo</button></div>';
+
+      p.innerHTML = html;
+
+      var copyBtn = doc.getElementById('igvo-hook-copy');
+      if (copyBtn) {
+        copyBtn.onclick = toPage(function() {
+          var text = items.map(function(e) {
+            return e.time + ' | ' + e.type + ' | ' + e.detail + ' | ' + e.url.substring(0, 80);
+          }).join('\n');
+          text = 'Fetch Hook v4.1 — ' + items.length + ' captures\n' + text;
+          try { GM_setClipboard(text, 'text'); copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158'; } catch(e) {
+            var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+            doc.body.appendChild(ta); ta.select(); doc.execCommand('copy'); ta.remove();
+            copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158';
+          }
+        });
+      }
+    }
+  }, 2000);
 })();

@@ -2,7 +2,7 @@
 // @name        IG View Once (TEST v4.3)
 // @description Test: fetch + XHR hook via blob
 // @match       https://www.instagram.com/*
-// @version     4.3
+// @version     4.3.1
 // @run-at      document-start
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -109,7 +109,7 @@
   setTimeout(function() {
     var panel = doc.createElement('div');
     panel.id = 'igvo-hook-panel';
-    panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:10px;padding:10px 14px;padding-bottom:max(10px,env(safe-area-inset-bottom));max-height:50vh;overflow-y:auto;box-shadow:0 -2px 10px rgba(0,0,0,0.5);display:none;';
+    panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:10px;padding:14px 16px;padding-bottom:max(14px,env(safe-area-inset-bottom));min-height:200px;max-height:60vh;overflow-y:auto;box-shadow:0 -2px 10px rgba(0,0,0,0.5);display:none;';
 
     var toggle = doc.createElement('button');
     toggle.id = 'igvo-hook-toggle';

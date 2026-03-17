@@ -2,7 +2,7 @@
 // @name        IG View Once (TEST v4.4)
 // @description Test: fetch + XHR hook via blob
 // @match       https://www.instagram.com/*
-// @version     4.4
+// @version     4.4.1
 // @run-at      document-start
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -136,17 +136,28 @@
       var xc = w.__igvo_xhr_count || 0;
       var items = w.__igvo_captured || [];
 
-      // Header
+      // Header con copiar y cerrar
       var header = doc.createElement('div');
-      header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+      header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
       var title = doc.createElement('span');
-      title.style.cssText = 'font-size:12px;font-weight:bold;';
+      title.style.cssText = 'font-size:12px;font-weight:bold;flex:1;';
       title.textContent = 'Hook v4.4';
+      var copyBtn = doc.createElement('button');
+      copyBtn.textContent = 'Copiar';
+      copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;';
+      copyBtn.onclick = toPage(function() {
+        var text = 'Hook v4.4 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n';
+        text += items.map(function(e) { return e.time + ' | ' + e.type + ' | ' + e.method + ' | ' + (e.detail||'') + ' | ' + e.url; }).join('\n');
+        var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+        doc.body.appendChild(ta); ta.focus(); ta.select(); doc.execCommand('copy'); ta.remove();
+        copyBtn.textContent = 'OK'; copyBtn.style.background = '#30d158';
+      });
       var closeBtn = doc.createElement('span');
       closeBtn.style.cssText = 'font-size:18px;cursor:pointer;color:#888;padding:4px 8px;';
       closeBtn.textContent = '\u2715';
       closeBtn.onclick = toPage(function() { panelVisible = false; panel.style.display = 'none'; });
       header.appendChild(title);
+      header.appendChild(copyBtn);
       header.appendChild(closeBtn);
       panel.appendChild(header);
 
@@ -170,18 +181,6 @@
         });
       }
 
-      // Copiar
-      var copyBtn = doc.createElement('button');
-      copyBtn.textContent = 'Copiar';
-      copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;margin-top:10px;';
-      copyBtn.onclick = toPage(function() {
-        var text = 'Hook v4.4 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n';
-        text += items.map(function(e) { return e.time + ' | ' + e.type + ' | ' + e.method + ' | ' + (e.detail||'') + ' | ' + e.url; }).join('\n');
-        var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
-        doc.body.appendChild(ta); ta.focus(); ta.select(); doc.execCommand('copy'); ta.remove();
-        copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158';
-      });
-      panel.appendChild(copyBtn);
     }
   }
 

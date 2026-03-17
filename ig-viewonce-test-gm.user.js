@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name        IG View Once (TEST v4.1)
-// @description Test: fetch hooking — intercept IG API calls
+// @name        IG View Once (TEST v4.2)
+// @description Test: fetch + XHR hooking
 // @match       https://www.instagram.com/*
-// @version     4.1
-// @run-at      document-end
+// @version     4.2
+// @run-at      document-start
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
 // @grant       GM_addElement
@@ -27,60 +27,81 @@
     return fn;
   }
 
-  // Inyectar el hook via blob (page context)
+  // Inyectar hook lo más temprano posible — antes de que IG guarde referencias
   var hookCode = [
     '(function() {',
     '  var captured = [];',
-    '  var originalFetch = window.fetch;',
+    '  window.__igvo_captured = captured;',
     '',
+    '  function processCapture(urlStr, status, body, method) {',
+    '    try {',
+    '      var isDM = urlStr.indexOf("/direct_v2/") > -1 || urlStr.indexOf("/direct/") > -1;',
+    '      var isAPI = urlStr.indexOf("/api/v1/") > -1 || urlStr.indexOf("/api/v2/") > -1;',
+    '      if (!isDM && !isAPI) return;',
+    '      var data = JSON.parse(body);',
+    '      var entry = {',
+    '        time: new Date().toLocaleTimeString("es", {hour:"2-digit",minute:"2-digit",second:"2-digit"}),',
+    '        method: method,',
+    '        url: urlStr.replace("https://www.instagram.com", "").split("?")[0],',
+    '        status: status,',
+    '        size: body.length,',
+    '        isDM: isDM,',
+    '      };',
+    '      if (data.inbox && data.inbox.threads) {',
+    '        entry.type = "inbox";',
+    '        entry.detail = data.inbox.threads.length + " threads";',
+    '      } else if (data.thread && data.thread.items) {',
+    '        entry.type = "thread";',
+    '        entry.detail = data.thread.items.length + " items, " + (data.thread.thread_title || "?");',
+    '      } else {',
+    '        entry.type = isDM ? "dm-other" : "api";',
+    '        var path = urlStr.split("?")[0].split("/");',
+    '        entry.detail = path.slice(-2).join("/");',
+    '      }',
+    '      captured.push(entry);',
+    '      window.dispatchEvent(new Event("igvo-capture"));',
+    '    } catch(e) {}',
+    '  }',
+    '',
+    '  // Hook fetch',
+    '  var origFetch = window.fetch;',
     '  window.fetch = function(url, opts) {',
     '    var urlStr = (typeof url === "string") ? url : (url && url.url ? url.url : String(url));',
-    '    return originalFetch.apply(this, arguments).then(function(response) {',
-    '      // Solo interceptar APIs de DM',
-    '      if (urlStr.indexOf("/direct_v2/") > -1 || urlStr.indexOf("/direct/") > -1) {',
-    '        response.clone().text().then(function(body) {',
-    '          try {',
-    '            var data = JSON.parse(body);',
-    '            var entry = {',
-    '              time: new Date().toLocaleTimeString("es", {hour:"2-digit",minute:"2-digit",second:"2-digit"}),',
-    '              url: urlStr.replace("https://www.instagram.com", ""),',
-    '              status: response.status,',
-    '              size: body.length,',
-    '              keys: Object.keys(data).join(","),',
-    '            };',
-    '',
-    '            // Extraer info útil según el endpoint',
-    '            if (data.inbox && data.inbox.threads) {',
-    '              entry.type = "inbox";',
-    '              entry.detail = data.inbox.threads.length + " threads";',
-    '            } else if (data.thread && data.thread.items) {',
-    '              entry.type = "thread";',
-    '              entry.detail = data.thread.items.length + " items, title: " + (data.thread.thread_title || "?");',
-    '              // Contar view-once',
-    '              var vo = data.thread.items.filter(function(i) {',
-    '                return (i.item_type === "raven_media" || i.item_type === "visual_media") && !i.is_sent_by_viewer;',
-    '              });',
-    '              if (vo.length) entry.detail += ", " + vo.length + " view-once";',
-    '            } else {',
-    '              entry.type = "other";',
-    '              entry.detail = urlStr.split("?")[0].split("/").pop();',
-    '            }',
-    '',
-    '            captured.push(entry);',
-    '            window.__igvo_captured = captured;',
-    '            window.dispatchEvent(new Event("igvo-capture"));',
-    '          } catch(e) {}',
-    '        });',
+    '    return origFetch.apply(this, arguments).then(function(r) {',
+    '      if (urlStr.indexOf("instagram.com") > -1 || urlStr.indexOf("/api/") > -1) {',
+    '        r.clone().text().then(function(body) { processCapture(urlStr, r.status, body, "fetch"); });',
     '      }',
-    '      return response;',
+    '      return r;',
     '    });',
     '  };',
     '',
-    '  window.__igvo_captured = captured;',
+    '  // Hook XMLHttpRequest',
+    '  var origXHROpen = XMLHttpRequest.prototype.open;',
+    '  var origXHRSend = XMLHttpRequest.prototype.send;',
+    '  XMLHttpRequest.prototype.open = function(method, url) {',
+    '    this._igvo_url = url;',
+    '    this._igvo_method = method;',
+    '    return origXHROpen.apply(this, arguments);',
+    '  };',
+    '  XMLHttpRequest.prototype.send = function() {',
+    '    var self = this;',
+    '    var url = self._igvo_url || "";',
+    '    if (url.indexOf("instagram.com") > -1 || url.indexOf("/api/") > -1) {',
+    '      self.addEventListener("load", function() {',
+    '        processCapture(url, self.status, self.responseText || "", "XHR");',
+    '      });',
+    '    }',
+    '    return origXHRSend.apply(this, arguments);',
+    '  };',
+    '',
     '})();'
   ].join('\n');
 
-  GM_addElement('script', { src: URL.createObjectURL(new Blob([hookCode], { type: 'application/javascript' })) });
+  // Inyectar inmediatamente (document-start)
+  var script = doc.createElement('script');
+  script.textContent = hookCode;
+  (doc.head || doc.documentElement).appendChild(script);
+  script.remove();
 
   // Panel de monitoreo
   setTimeout(function() {
@@ -122,7 +143,7 @@
       var items = w.__igvo_captured || [];
 
       var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
-      html += '<span style="font-size:12px;font-weight:bold;">Fetch Hook v4.1 — ' + items.length + ' captured</span>';
+      html += '<span style="font-size:12px;font-weight:bold;">Hook v4.2 — ' + items.length + ' captured</span>';
       html += '<span style="cursor:pointer;color:#888;font-size:16px;padding:2px 6px;" onclick="document.getElementById(\'igvo-hook-panel\').style.display=\'none\'">✕</span>';
       html += '</div>';
 
@@ -133,6 +154,7 @@
           var color = e.type === 'inbox' ? '#007AFF' : e.type === 'thread' ? '#30d158' : '#888';
           html += '<div style="padding:6px 0;border-bottom:1px solid #2a2a2e;">';
           html += '<span style="color:' + color + ';font-weight:600;">[' + e.type + ']</span> ';
+          html += '<span style="color:#ff9f0a;font-size:9px;">' + e.method + '</span> ';
           html += '<span style="color:#888;">' + e.time + '</span> ';
           html += '<span style="color:#ccc;">' + e.detail + '</span>';
           html += '<div style="color:#555;font-size:9px;margin-top:2px;">' + e.url.substring(0, 80) + ' — ' + Math.round(e.size/1024) + 'KB</div>';
@@ -151,7 +173,7 @@
           var text = items.map(function(e) {
             return e.time + ' | ' + e.type + ' | ' + e.detail + ' | ' + e.url.substring(0, 80);
           }).join('\n');
-          text = 'Fetch Hook v4.1 — ' + items.length + ' captures\n' + text;
+          text = 'Hook v4.2 — ' + items.length + ' captures\n' + text;
           try { GM_setClipboard(text, 'text'); copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158'; } catch(e) {
             var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
             doc.body.appendChild(ta); ta.select(); doc.execCommand('copy'); ta.remove();

@@ -2,7 +2,7 @@
 // @name        IG View Once (TEST v4.4)
 // @description Test: fetch + XHR hook via blob
 // @match       https://www.instagram.com/*
-// @version     4.4.1
+// @version     4.5
 // @run-at      document-start
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -134,24 +134,32 @@
       var hookOk = w.__igvo_hook_installed ? 'YES' : 'NO';
       var fc = w.__igvo_fetch_count || 0;
       var xc = w.__igvo_xhr_count || 0;
-      var items = w.__igvo_captured || [];
+      // Serializar para cruzar la barrera sandbox ↔ page context
+      var items = [];
+      try { items = JSON.parse(JSON.stringify(w.__igvo_captured || [])); } catch(e) {}
 
       // Header con copiar y cerrar
       var header = doc.createElement('div');
       header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
       var title = doc.createElement('span');
       title.style.cssText = 'font-size:12px;font-weight:bold;flex:1;';
-      title.textContent = 'Hook v4.4';
+      title.textContent = 'Hook v4.5';
+      var copyText = 'Hook v4.5 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n';
+      copyText += items.map(function(e) { return e.time + ' | ' + e.type + ' | ' + e.method + ' | ' + (e.detail||'') + ' | ' + e.url; }).join('\n');
+
       var copyBtn = doc.createElement('button');
       copyBtn.textContent = 'Copiar';
       copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;';
+      // Guardar el texto en un atributo para no depender de closures cross-context
+      copyBtn.dataset.text = copyText;
       copyBtn.onclick = toPage(function() {
-        var text = 'Hook v4.4 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n';
-        text += items.map(function(e) { return e.time + ' | ' + e.type + ' | ' + e.method + ' | ' + (e.detail||'') + ' | ' + e.url; }).join('\n');
-        var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
-        doc.body.appendChild(ta); ta.focus(); ta.select(); doc.execCommand('copy'); ta.remove();
-        copyBtn.textContent = 'OK'; copyBtn.style.background = '#30d158';
+        var btn = document.querySelector('#igvo-hook-copy-btn');
+        if (!btn) return;
+        var ta = document.createElement('textarea'); ta.value = btn.dataset.text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+        document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); ta.remove();
+        btn.textContent = 'OK'; btn.style.background = '#30d158';
       });
+      copyBtn.id = 'igvo-hook-copy-btn';
       var closeBtn = doc.createElement('span');
       closeBtn.style.cssText = 'font-size:18px;cursor:pointer;color:#888;padding:4px 8px;';
       closeBtn.textContent = '\u2715';

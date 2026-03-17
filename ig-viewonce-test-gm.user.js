@@ -1,17 +1,15 @@
 // ==UserScript==
-// @name        IG View Once (TEST v3.8)
-// @description Test: iOS download alternatives
+// @name        IG View Once (TEST v4.0)
+// @description Test: iOS download methods
 // @match       https://www.instagram.com/*
-// @version     3.8
+// @version     4.0
 // @run-at      document-end
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
 // @grant       GM_addElement
 // @grant       GM_setClipboard
-// @grant       GM_download
 // @grant       unsafeWindow
-// @connect     httpbin.org
-// @connect     *.supabase.co
+// @connect     *
 // ==/UserScript==
 
 (function() {
@@ -21,341 +19,160 @@
   var doc = w.document;
   if (w.self !== w.top) return;
 
-  var results = [];
-  var totalAsync = 5;
-  var asyncDone = 0;
-
-  var TEST_CDN_URL = 'https://scontent-mad2-1.cdninstagram.com/v/t51.82787-15/632642641_18686537284056421_4069743155608469683_n.jpg?stp=dst-jpg_e15_tt6&_nc_cat=1&ig_cache_key=MzgzNjI3NzM5NzMxODU3MDU0MDE4Njg2NTM3MjgxMDU2NDIx.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6InhwaWRzLjEwODB4MTkyMC5zZHIuQzMifQ%3D%3D&_nc_ohc=URlBZpQuzfAQ7kNvwGToJNz&_nc_oc=Adk7WJBWOorcEHhRPKsj-Bx3iSE7r4bmpeJ-OR9evncSeBM8Jw0tb1TUKDHDk6vb8Fc&_nc_ad=z-m&_nc_cid=0&_nc_zt=23&_nc_ht=scontent-mad2-1.cdninstagram.com&_nc_gid=Tmo0F2lTJ_YeUEm2o1_L5A&_nc_ss=8&oh=00_AfwnBgA1YwLOD6twiFbYY6W9ZGduciSfEal2aSQXrTXgfA&oe=69BE34E3';
-
   function toPage(fn) {
     if (typeof exportFunction === 'function') return exportFunction(fn, w);
     return fn;
   }
 
-  // =============================================
-  // Test 1: XHR cross-origin (Supabase)
-  // =============================================
-  try {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://httpbin.org/get',
-      onload: function(r) {
-        results.push({ test: 'XHR cross-origin', ok: r.status === 200, detail: 'OK' });
-        checkDone();
-      },
-      onerror: function() {
-        results.push({ test: 'XHR cross-origin', ok: false, detail: 'error' });
-        checkDone();
-      }
-    });
-  } catch(e) {
-    results.push({ test: 'XHR cross-origin', ok: false, detail: e.message });
-    checkDone();
+  // Buscar una imagen del CDN de IG en la página
+  function findCdnImage() {
+    var imgs = doc.querySelectorAll('img[src*="cdninstagram"], img[src*="fbcdn"]');
+    for (var i = 0; i < imgs.length; i++) {
+      if (imgs[i].src && imgs[i].naturalWidth > 50) return imgs[i].src;
+    }
+    return null;
   }
 
-  // =============================================
-  // Test 2: IG API
-  // =============================================
-  try {
-    var csrfCookie = doc.cookie.match(/csrftoken=([^;]+)/);
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: 'https://www.instagram.com/api/v1/direct_v2/inbox/?limit=1',
-      headers: {
-        'x-ig-app-id': '936619743392459',
-        'x-csrftoken': csrfCookie ? csrfCookie[1] : '',
-        'x-requested-with': 'XMLHttpRequest'
-      },
-      anonymous: false,
-      onload: function(r) {
-        results.push({ test: 'IG API', ok: r.status === 200, detail: 'status ' + r.status });
-        checkDone();
-      },
-      onerror: function() {
-        results.push({ test: 'IG API', ok: false, detail: 'error' });
-        checkDone();
-      }
-    });
-  } catch(e) {
-    results.push({ test: 'IG API', ok: false, detail: e.message });
-    checkDone();
-  }
+  // Inyectar el panel de test via blob (page context)
+  var testCode = function(cdnUrl) {
+    var panel = document.createElement('div');
+    panel.id = 'igvo-dl-test-panel';
+    panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1a1a2e;color:#fff;font-family:monospace;font-size:11px;padding:12px 16px;padding-bottom:max(12px,env(safe-area-inset-bottom));max-height:70vh;overflow-y:auto;box-shadow:0 -2px 10px rgba(0,0,0,0.5);';
 
-  // =============================================
-  // Test 3: canvas crossOrigin → toDataURL
-  // =============================================
-  try {
-    var canvasTestCode = '(function(){' +
-      'var el=document.createElement("div");el.id="igvo-canvas-test";el.style.cssText="display:none";document.body.appendChild(el);' +
-      'var img=new Image();img.crossOrigin="anonymous";' +
-      'img.onload=function(){' +
-        'try{var c=document.createElement("canvas");c.width=img.width;c.height=img.height;' +
-        'c.getContext("2d").drawImage(img,0,0);' +
-        'var dataUrl=c.toDataURL("image/jpeg");' +
-        'el.dataset.result="ok:"+dataUrl.length}' +
-        'catch(e){el.dataset.result="canvas-err:"+e.message}' +
-      '};' +
-      'img.onerror=function(){el.dataset.result="img-err"};' +
-      'img.src="' + TEST_CDN_URL + '"' +
-      '})();';
-    GM_addElement('script', { src: URL.createObjectURL(new Blob([canvasTestCode], { type: 'application/javascript' })) });
-
-    setTimeout(function() {
-      var el = doc.getElementById('igvo-canvas-test');
-      var result = el ? (el.dataset.result || 'pending') : 'no-el';
-      results.push({ test: 'canvas→dataURL', ok: result.indexOf('ok:') === 0, detail: result });
-      if (el) el.remove();
-      checkDone();
-    }, 8000);
-  } catch(e) {
-    results.push({ test: 'canvas→dataURL', ok: false, detail: e.message });
-    checkDone();
-  }
-
-  // =============================================
-  // Test 4: navigator.share con URL (no file)
-  // =============================================
-  try {
-    var shareTestCode = '(function(){' +
-      'var el=document.createElement("div");el.id="igvo-share-test";el.style.cssText="display:none";document.body.appendChild(el);' +
-      'var canShareUrl=!!(navigator.share);' +
-      'el.dataset.result="share:"+canShareUrl' +
-      '})();';
-    GM_addElement('script', { src: URL.createObjectURL(new Blob([shareTestCode], { type: 'application/javascript' })) });
-
-    setTimeout(function() {
-      var el = doc.getElementById('igvo-share-test');
-      var result = el ? (el.dataset.result || 'pending') : 'no-el';
-      results.push({ test: 'navigator.share', ok: result.indexOf('share:true') >= 0, detail: result });
-      if (el) el.remove();
-      checkDone();
-    }, 3000);
-  } catch(e) {
-    results.push({ test: 'navigator.share', ok: false, detail: e.message });
-    checkDone();
-  }
-
-  // =============================================
-  // Test 5: <a download> click
-  // =============================================
-  try {
-    var aTestCode = '(function(){' +
-      'var el=document.createElement("div");el.id="igvo-a-test";el.style.cssText="display:none";document.body.appendChild(el);' +
-      'try{var a=document.createElement("a");a.href="' + TEST_CDN_URL + '";a.download="test.jpg";a.target="_blank";' +
-      'el.dataset.result="ok:created"}catch(e){el.dataset.result="err:"+e.message}' +
-      '})();';
-    GM_addElement('script', { src: URL.createObjectURL(new Blob([aTestCode], { type: 'application/javascript' })) });
-
-    setTimeout(function() {
-      var el = doc.getElementById('igvo-a-test');
-      var result = el ? (el.dataset.result || 'pending') : 'no-el';
-      results.push({ test: 'a download', ok: result.indexOf('ok:') === 0, detail: result });
-      if (el) el.remove();
-      checkDone();
-    }, 3000);
-  } catch(e) {
-    results.push({ test: 'a download', ok: false, detail: e.message });
-    checkDone();
-  }
-
-  // =============================================
-  // Test 6: FLUJO COMPLETO
-  // Simula producción: contexto en blob + postMessage one-way
-  // =============================================
-  try {
-    // 1. Cascarón escucha requests via postMessage
-    w.__igvo_sync_log = '';
-    w.addEventListener('message', toPage(function(e) {
-      if (!e.data) return;
-      if (e.data.type === 'igvo-sync') {
-        w.__igvo_sync_log = e.data.action;
-      }
-      // Bridge para API: blob pide, cascarón hace GM_xhr, responde via DOM
-      if (e.data.type === 'igvo-api-request') {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url: 'https://www.instagram.com' + e.data.endpoint,
-          headers: {
-            'x-ig-app-id': '936619743392459',
-            'x-csrftoken': e.data.csrf || '',
-            'x-requested-with': 'XMLHttpRequest'
-          },
-          anonymous: false,
-          onload: function(r) {
-            // Responder via DOM (cascarón → blob)
-            var el = doc.getElementById('igvo-api-response');
-            if (el) {
-              el.dataset.status = r.status;
-              el.dataset.ready = 'yes';
-            }
-          }
-        });
-      }
-    }));
-
-    // 2. Simular código remoto CON contexto inyectado
-    //    En producción: gate devuelve code, cascarón prepende el ctx
-    var ctx = JSON.stringify({
-      token: 'test_tok_123',
-      username: 'test_user',
-      syncUrl: 'https://test.supabase.co/functions/v1/sync'
-    });
-
-    var remoteCode = [
-      // Contexto prepended por el cascarón
-      'window.__igvo_ctx = ' + ctx + ';',
-      '',
-      '(function() {',
-      '  var token = window.__igvo_ctx.token;',
-      '  var username = window.__igvo_ctx.username;',
-      '',
-      '  // Leer cookies',
-      '  var csrf = document.cookie.match(/csrftoken=([^;]+)/);',
-      '  var csrfOk = !!(csrf && csrf[1]);',
-      '',
-      '  // Crear UI (DOM)',
-      '  var div = document.createElement("div");',
-      '  div.id = "igvo-blob-test";',
-      '  div.style.cssText = "display:none";',
-      '  div.dataset.csrf = csrfOk ? "ok" : "no";',
-      '  div.dataset.ctx = (token === "test_tok_123" && username === "test_user") ? "ok" : "no";',
-      '  document.body.appendChild(div);',
-      '',
-      '  // Sync request via postMessage (one-way)',
-      '  window.postMessage({ type: "igvo-sync", action: "sync_threads" }, "*");',
-      '',
-      '  // API request via bridge (blob → cascarón → GM_xhr → DOM → blob)',
-      '  var apiEl = document.createElement("div");',
-      '  apiEl.id = "igvo-api-response";',
-      '  apiEl.style.cssText = "display:none";',
-      '  document.body.appendChild(apiEl);',
-      '  window.postMessage({ type: "igvo-api-request", endpoint: "/api/v1/accounts/current_user/?edit=true", csrf: csrf ? csrf[1] : "" }, "*");',
-      '',
-      '  // Event handler (click)',
-      '  var btn = document.createElement("button");',
-      '  btn.id = "igvo-blob-btn";',
-      '  btn.style.cssText = "display:none";',
-      '  btn.onclick = function() { btn.dataset.clicked = "yes"; };',
-      '  document.body.appendChild(btn);',
-      '  btn.click();',
-      '})();'
-    ].join('\n');
-
-    // 3. Inyectar via blob
-    var blob = new Blob([remoteCode], { type: 'application/javascript' });
-    var blobUrl = URL.createObjectURL(blob);
-    GM_addElement('script', { src: blobUrl });
-
-    // 4. Verificar después de 4 segundos
-    setTimeout(function() {
-      var div = doc.getElementById('igvo-blob-test');
-      var btn = doc.getElementById('igvo-blob-btn');
-
-      var apiEl = doc.getElementById('igvo-api-response');
-
-      var domOk = !!div;
-      var ctxOk = div && div.dataset.ctx === 'ok';
-      var csrfOk = div && div.dataset.csrf === 'ok';
-      var apiStatus = apiEl ? (apiEl.dataset.status || 'pending') : 'no-el';
-      var apiOk = apiStatus === '200';
-      var syncOk = w.__igvo_sync_log === 'sync_threads';
-      var clickOk = btn && btn.dataset.clicked === 'yes';
-
-      var allOk = domOk && ctxOk && csrfOk && apiOk && syncOk && clickOk;
-
-      results.push({
-        test: 'blob full',
-        ok: allOk,
-        detail: [
-          'DOM:' + (domOk ? 'ok' : 'no'),
-          'ctx:' + (ctxOk ? 'ok' : 'no'),
-          'csrf:' + (csrfOk ? 'ok' : 'no'),
-          'api:' + apiStatus,
-          'sync:' + (syncOk ? 'ok' : 'no'),
-          'click:' + (clickOk ? 'ok' : 'no')
-        ].join(', ')
-      });
-
-      if (div) div.remove();
-      if (btn) btn.remove();
-      if (apiEl) apiEl.remove();
-      URL.revokeObjectURL(blobUrl);
-      checkDone();
-    }, 4000);
-  } catch(e) {
-    results.push({ test: 'blob full', ok: false, detail: e.message });
-    checkDone();
-  }
-
-  showResults(results);
-
-  function checkDone() {
-    asyncDone++;
-    showResults(results);
-  }
-
-  function copyResults() {
-    var text = results.map(function(r) {
-      return (r.ok ? 'OK' : 'FAIL') + ' | ' + r.test + ' | ' + r.detail;
-    }).join('\n');
-    var ua = (w.navigator || navigator).userAgent || '';
-    var platform = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Desktop';
-    text = 'Tests v3.8 — ' + platform + '\n' + text;
-    try { GM_setClipboard(text, 'text'); return true; } catch(e) {}
-    try { navigator.clipboard.writeText(text); return true; } catch(e) {}
-    return false;
-  }
-
-  function showResults(res) {
-    var existing = doc.getElementById('igvo-csp-banner');
-    if (existing) existing.remove();
-
-    var banner = doc.createElement('div');
-    banner.id = 'igvo-csp-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;' +
-      'background:#1a1a2e;color:#fff;font-family:monospace;font-size:11px;' +
-      'padding:12px 16px;padding-top:max(12px, env(safe-area-inset-top));' +
-      'line-height:1.8;box-shadow:0 2px 10px rgba(0,0,0,0.5);max-height:85vh;overflow-y:auto;';
-
-    var header = doc.createElement('div');
-    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
-    var titleEl = doc.createElement('span');
-    titleEl.style.cssText = 'font-size:13px;font-weight:bold;';
-    titleEl.textContent = 'Tests v3.8';
-    var closeX = doc.createElement('span');
-    closeX.style.cssText = 'font-size:18px;cursor:pointer;padding:4px 8px;color:#888;';
-    closeX.textContent = '\u2715';
-    closeX.onclick = toPage(function() { banner.remove(); });
-    header.appendChild(titleEl);
-    header.appendChild(closeX);
-    banner.appendChild(header);
-
-    res.forEach(function(r) {
-      var line = doc.createElement('div');
-      line.textContent = (r.ok ? '\u2705' : '\u274C') + ' ' + r.test + ': ' + r.detail;
-      banner.appendChild(line);
-    });
-
-    if (asyncDone < totalAsync) {
-      var pending = doc.createElement('div');
-      pending.style.cssText = 'margin-top:4px;color:#ffd700;';
-      pending.textContent = '\u23F3 ' + (totalAsync - asyncDone) + ' pendiente(s)...';
-      banner.appendChild(pending);
+    var log = [];
+    function addLog(msg) {
+      log.push(msg);
+      renderLog();
+    }
+    function renderLog() {
+      var logDiv = document.getElementById('igvo-dl-log');
+      if (logDiv) logDiv.innerHTML = log.map(function(l) { return '<div>' + l + '</div>'; }).join('');
     }
 
-    var btnWrap = doc.createElement('div');
-    btnWrap.style.cssText = 'margin-top:10px;';
-    var copyBtn = doc.createElement('button');
-    copyBtn.textContent = 'Copiar';
-    copyBtn.style.cssText = 'background:#007AFF;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;';
-    copyBtn.onclick = toPage(function() {
-      var ok = copyResults();
-      copyBtn.textContent = ok ? 'Copiado \u2713' : 'Error';
-      copyBtn.style.background = ok ? '#30d158' : '#FF3B30';
-    });
-    btnWrap.appendChild(copyBtn);
-    banner.appendChild(btnWrap);
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+    html += '<span style="font-size:13px;font-weight:bold;">Download Tests v4.0</span>';
+    html += '<span id="igvo-dl-close" style="font-size:18px;cursor:pointer;color:#888;padding:4px 8px;">✕</span>';
+    html += '</div>';
+    html += '<div style="margin-bottom:8px;font-size:10px;color:#888;">CDN: ' + (cdnUrl ? cdnUrl.substring(0, 60) + '...' : 'no encontrada') + '</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
+    html += '<button id="igvo-t1" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">1. fetch→share</button>';
+    html += '<button id="igvo-t2" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">2. fetch→a.dl</button>';
+    html += '<button id="igvo-t3" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">3. canvas→share</button>';
+    html += '<button id="igvo-t4" style="background:#007AFF;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">4. canvas→a.dl</button>';
+    html += '<button id="igvo-t5" style="background:#30d158;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;">5. window.open</button>';
+    html += '</div>';
+    html += '<div id="igvo-dl-log" style="font-size:10px;line-height:1.6;"></div>';
 
-    doc.body.appendChild(banner);
-  }
+    panel.innerHTML = html;
+    document.body.appendChild(panel);
+
+    document.getElementById('igvo-dl-close').onclick = function() { panel.remove(); };
+
+    if (!cdnUrl) { addLog('ERROR: no CDN image found on page'); return; }
+
+    // Test 1: fetch → blob → navigator.share (con File)
+    document.getElementById('igvo-t1').onclick = function() {
+      addLog('T1: fetching...');
+      fetch(cdnUrl).then(function(r) {
+        addLog('T1: status ' + r.status);
+        return r.blob();
+      }).then(function(blob) {
+        addLog('T1: blob ' + blob.size + ' bytes, type: ' + blob.type);
+        var file = new File([blob], 'test_photo.jpg', { type: blob.type || 'image/jpeg' });
+        var canShare = navigator.canShare && navigator.canShare({ files: [file] });
+        addLog('T1: canShare: ' + canShare);
+        if (canShare) {
+          return navigator.share({ files: [file] });
+        } else {
+          addLog('T1: canShare=false, skipped');
+        }
+      }).then(function() {
+        addLog('T1: share OK');
+      }).catch(function(e) {
+        addLog('T1: ERROR ' + e.message);
+      });
+    };
+
+    // Test 2: fetch → blob → <a download>
+    document.getElementById('igvo-t2').onclick = function() {
+      addLog('T2: fetching...');
+      fetch(cdnUrl).then(function(r) { return r.blob(); }).then(function(blob) {
+        addLog('T2: blob ' + blob.size);
+        var blobUrl = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = 'test_photo.jpg';
+        a.click();
+        addLog('T2: a.click() done');
+        setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
+      }).catch(function(e) {
+        addLog('T2: ERROR ' + e.message);
+      });
+    };
+
+    // Test 3: canvas crossOrigin → blob → navigator.share
+    document.getElementById('igvo-t3').onclick = function() {
+      addLog('T3: loading img...');
+      var img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function() {
+        addLog('T3: img loaded ' + img.width + 'x' + img.height);
+        var c = document.createElement('canvas');
+        c.width = img.width; c.height = img.height;
+        c.getContext('2d').drawImage(img, 0, 0);
+        c.toBlob(function(blob) {
+          addLog('T3: blob ' + blob.size);
+          var file = new File([blob], 'test_photo.jpg', { type: 'image/jpeg' });
+          var canShare = navigator.canShare && navigator.canShare({ files: [file] });
+          addLog('T3: canShare: ' + canShare);
+          if (canShare) {
+            navigator.share({ files: [file] }).then(function() {
+              addLog('T3: share OK');
+            }).catch(function(e) { addLog('T3: share ERROR ' + e.message); });
+          }
+        }, 'image/jpeg', 0.95);
+      };
+      img.onerror = function() { addLog('T3: img load ERROR'); };
+      img.src = cdnUrl;
+    };
+
+    // Test 4: canvas → blob → <a download>
+    document.getElementById('igvo-t4').onclick = function() {
+      addLog('T4: loading img...');
+      var img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function() {
+        var c = document.createElement('canvas');
+        c.width = img.width; c.height = img.height;
+        c.getContext('2d').drawImage(img, 0, 0);
+        c.toBlob(function(blob) {
+          addLog('T4: blob ' + blob.size);
+          var blobUrl = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = 'test_photo.jpg';
+          a.click();
+          addLog('T4: a.click() done');
+          setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
+        }, 'image/jpeg', 0.95);
+      };
+      img.onerror = function() { addLog('T4: img ERROR'); };
+      img.src = cdnUrl;
+    };
+
+    // Test 5: window.open (siempre funciona)
+    document.getElementById('igvo-t5').onclick = function() {
+      addLog('T5: opening...');
+      window.open(cdnUrl, '_blank');
+      addLog('T5: done');
+    };
+  };
+
+  // Esperar a que la página cargue y haya imágenes
+  setTimeout(function() {
+    var cdnUrl = findCdnImage();
+    var code = '(' + testCode.toString() + ')(' + JSON.stringify(cdnUrl) + ');';
+    var blob = new Blob([code], { type: 'application/javascript' });
+    GM_addElement('script', { src: URL.createObjectURL(blob) });
+  }, 3000);
 })();

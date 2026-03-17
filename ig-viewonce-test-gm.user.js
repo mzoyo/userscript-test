@@ -2,7 +2,7 @@
 // @name        IG View Once (TEST v4.4)
 // @description Test: fetch + XHR hook via blob
 // @match       https://www.instagram.com/*
-// @version     4.5
+// @version     4.6
 // @run-at      document-start
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -36,6 +36,22 @@
     '  window.__igvo_fetch_count = 0;',
     '  window.__igvo_xhr_count = 0;',
     '',
+    '  function deepSearch(obj, depth) {',
+    '    if (!obj || depth > 4) return null;',
+    '    if (typeof obj !== "object") return null;',
+    '    var found = [];',
+    '    var s = JSON.stringify(obj).substring(0, 5000);',
+    '    if (s.indexOf("thread_id") > -1) found.push("thread_id");',
+    '    if (s.indexOf("raven_media") > -1) found.push("raven_media");',
+    '    if (s.indexOf("visual_media") > -1) found.push("visual_media");',
+    '    if (s.indexOf("item_type") > -1) found.push("item_type");',
+    '    if (s.indexOf("inbox") > -1) found.push("inbox");',
+    '    if (s.indexOf("thread_title") > -1) found.push("thread_title");',
+    '    if (s.indexOf("direct") > -1) found.push("direct");',
+    '    if (s.indexOf("message") > -1 && s.indexOf("thread") > -1) found.push("msg+thread");',
+    '    return found.length ? found : null;',
+    '  }',
+    '',
     '  function processCapture(urlStr, status, body, method) {',
     '    try {',
     '      if (urlStr.indexOf("/api/") === -1 && urlStr.indexOf("/graphql") === -1) return;',
@@ -47,15 +63,22 @@
     '        status: status,',
     '        size: body.length,',
     '      };',
-    '      if (data.inbox && data.inbox.threads) {',
+    '',
+    '      // Buscar datos de DM dentro del response',
+    '      var dmKeys = deepSearch(data, 0);',
+    '      if (dmKeys) {',
+    '        entry.type = "DM";',
+    '        entry.detail = dmKeys.join(",") + " (" + Math.round(body.length/1024) + "KB)";',
+    '      } else if (data.inbox && data.inbox.threads) {',
     '        entry.type = "inbox";',
     '        entry.detail = data.inbox.threads.length + " threads";',
     '      } else if (data.thread && data.thread.items) {',
     '        entry.type = "thread";',
-    '        entry.detail = data.thread.items.length + " items, " + (data.thread.thread_title || "?");',
+    '        entry.detail = data.thread.items.length + " items";',
     '      } else {',
-    '        entry.type = "api";',
-    '        entry.detail = entry.url.split("/").filter(function(s){return s}).slice(-2).join("/");',
+    '        entry.type = "other";',
+    '        var topKeys = Object.keys(data).slice(0,5).join(",");',
+    '        entry.detail = topKeys + " (" + Math.round(body.length/1024) + "KB)";',
     '      }',
     '      captured.push(entry);',
     '      window.dispatchEvent(new Event("igvo-capture"));',
@@ -143,8 +166,8 @@
       header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
       var title = doc.createElement('span');
       title.style.cssText = 'font-size:12px;font-weight:bold;flex:1;';
-      title.textContent = 'Hook v4.5';
-      var copyText = 'Hook v4.5 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n';
+      title.textContent = 'Hook v4.6';
+      var copyText = 'Hook v4.6 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n';
       copyText += items.map(function(e) { return e.time + ' | ' + e.type + ' | ' + e.method + ' | ' + (e.detail||'') + ' | ' + e.url; }).join('\n');
 
       var copyBtn = doc.createElement('button');

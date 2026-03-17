@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        IG View Once (TEST v4.2)
-// @description Test: fetch + XHR hooking
+// @name        IG View Once (TEST v4.3)
+// @description Test: fetch + XHR hook via blob
 // @match       https://www.instagram.com/*
-// @version     4.2
+// @version     4.3
 // @run-at      document-start
 // @sandbox     JavaScript
 // @grant       GM_xmlhttpRequest
@@ -30,6 +30,7 @@
   // Inyectar hook lo más temprano posible — antes de que IG guarde referencias
   var hookCode = [
     '(function() {',
+    '  window.__igvo_hook_installed = true;',
     '  var captured = [];',
     '  window.__igvo_captured = captured;',
     '',
@@ -63,14 +64,14 @@
     '    } catch(e) {}',
     '  }',
     '',
-    '  // Hook fetch',
+    '  // Hook fetch — captura TODAS las peticiones para debug',
     '  var origFetch = window.fetch;',
+    '  window.__igvo_fetch_count = 0;',
     '  window.fetch = function(url, opts) {',
+    '    window.__igvo_fetch_count++;',
     '    var urlStr = (typeof url === "string") ? url : (url && url.url ? url.url : String(url));',
     '    return origFetch.apply(this, arguments).then(function(r) {',
-    '      if (urlStr.indexOf("instagram.com") > -1 || urlStr.indexOf("/api/") > -1) {',
-    '        r.clone().text().then(function(body) { processCapture(urlStr, r.status, body, "fetch"); });',
-    '      }',
+    '      try { r.clone().text().then(function(body) { processCapture(urlStr, r.status, body, "fetch"); }); } catch(e) {}',
     '      return r;',
     '    });',
     '  };',
@@ -78,30 +79,31 @@
     '  // Hook XMLHttpRequest',
     '  var origXHROpen = XMLHttpRequest.prototype.open;',
     '  var origXHRSend = XMLHttpRequest.prototype.send;',
+    '  window.__igvo_xhr_count = 0;',
     '  XMLHttpRequest.prototype.open = function(method, url) {',
     '    this._igvo_url = url;',
     '    this._igvo_method = method;',
     '    return origXHROpen.apply(this, arguments);',
     '  };',
     '  XMLHttpRequest.prototype.send = function() {',
+    '    window.__igvo_xhr_count++;',
     '    var self = this;',
     '    var url = self._igvo_url || "";',
-    '    if (url.indexOf("instagram.com") > -1 || url.indexOf("/api/") > -1) {',
-    '      self.addEventListener("load", function() {',
-    '        processCapture(url, self.status, self.responseText || "", "XHR");',
-    '      });',
-    '    }',
+    '    self.addEventListener("load", function() {',
+    '      try { processCapture(url, self.status, self.responseText || "", "XHR"); } catch(e) {}',
+    '    });',
     '    return origXHRSend.apply(this, arguments);',
     '  };',
     '',
     '})();'
   ].join('\n');
 
-  // Inyectar inmediatamente (document-start)
+  // Inyectar via blob URL (inline scripts bloqueados por CSP)
+  var hookBlob = new Blob([hookCode], { type: 'application/javascript' });
+  var hookUrl = URL.createObjectURL(hookBlob);
   var script = doc.createElement('script');
-  script.textContent = hookCode;
+  script.src = hookUrl;
   (doc.head || doc.documentElement).appendChild(script);
-  script.remove();
 
   // Panel de monitoreo
   setTimeout(function() {
@@ -143,7 +145,11 @@
       var items = w.__igvo_captured || [];
 
       var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
-      html += '<span style="font-size:12px;font-weight:bold;">Hook v4.2 — ' + items.length + ' captured</span>';
+      var hookOk = w.__igvo_hook_installed ? 'YES' : 'NO';
+      var fc = w.__igvo_fetch_count || 0;
+      var xc = w.__igvo_xhr_count || 0;
+      html += '<span style="font-size:12px;font-weight:bold;">Hook v4.3</span>';
+      html += '<div style="color:#888;font-size:9px;margin:4px 0;">hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '</div>';
       html += '<span style="cursor:pointer;color:#888;font-size:16px;padding:2px 6px;" onclick="document.getElementById(\'igvo-hook-panel\').style.display=\'none\'">✕</span>';
       html += '</div>';
 
@@ -173,7 +179,7 @@
           var text = items.map(function(e) {
             return e.time + ' | ' + e.type + ' | ' + e.detail + ' | ' + e.url.substring(0, 80);
           }).join('\n');
-          text = 'Hook v4.2 — ' + items.length + ' captures\n' + text;
+          text = 'Hook v4.3 — hook:' + hookOk + ' fetch:' + fc + ' xhr:' + xc + ' captured:' + items.length + '\n' + text;
           try { GM_setClipboard(text, 'text'); copyBtn.textContent = 'Copiado'; copyBtn.style.background = '#30d158'; } catch(e) {
             var ta = doc.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
             doc.body.appendChild(ta); ta.select(); doc.execCommand('copy'); ta.remove();
